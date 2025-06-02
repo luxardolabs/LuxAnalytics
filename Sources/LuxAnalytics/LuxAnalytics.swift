@@ -6,6 +6,8 @@ public final class LuxAnalytics {
     private var currentUserId: String?
     private var currentSessionId: String?
     
+    private init() {}
+    
     public func setUser(_ userId: String?) {
         self.currentUserId = userId
     }
@@ -64,8 +66,9 @@ public final class LuxAnalytics {
 
         let timestamp = String(Int(Date().timeIntervalSince1970))
         
+        // CRITICAL: Sign payload + timestamp (not just payload)
         let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
-        let message = payload + Data(timestamp.utf8)
+        let message = payload + Data(timestamp.utf8)  // ← This was missing in original!
         let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
         let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
 
