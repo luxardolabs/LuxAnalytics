@@ -5,7 +5,16 @@ public final class LuxAnalyticsQueue {
     private let queueKey = "lux_event_queue"
     private let lock = NSLock()
 
+    private init() {}
+
+    public var queueSize: Int {
+        return getQueue()?.count ?? 0
+    }
+
     public func enqueue(_ event: AnalyticsEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        
         var queue = getQueue() ?? []
         queue.append(event)
         save(queue)
@@ -21,14 +30,12 @@ public final class LuxAnalyticsQueue {
         save(failed)
     }
 
-    public func flushBatch(using sendBatch: ([AnalyticsEvent]) -> Bool) {
+    public func flushBatch(using sendBatch: ([AnalyticsEvent]) -> Bool, batchSize: Int = 10) {
         lock.lock()
         defer { lock.unlock() }
 
         guard let queue = getQueue(), !queue.isEmpty else { return }
 
-        // Send in batches of 10
-        let batchSize = 10
         var remaining = queue
         
         while !remaining.isEmpty {
@@ -36,7 +43,6 @@ public final class LuxAnalyticsQueue {
             remaining = Array(remaining.dropFirst(batchSize))
             
             if sendBatch(batch) {
-                // Success - continue with next batch
                 continue
             } else {
                 // Failed - save remaining + current batch back to queue
