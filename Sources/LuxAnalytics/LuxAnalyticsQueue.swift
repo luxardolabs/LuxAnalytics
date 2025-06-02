@@ -17,8 +17,37 @@ public final class LuxAnalyticsQueue {
 
         guard let queue = getQueue(), !queue.isEmpty else { return }
 
-        let (sent, failed) = queue.partitioned { send(./1.sh) }
+        let (sent, failed) = queue.partitioned { send($0) }
         save(failed)
+    }
+
+    public func flushBatch(using sendBatch: ([AnalyticsEvent]) -> Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let queue = getQueue(), !queue.isEmpty else { return }
+
+        // Send in batches of 10
+        let batchSize = 10
+        var remaining = queue
+        
+        while !remaining.isEmpty {
+            let batch = Array(remaining.prefix(batchSize))
+            remaining = Array(remaining.dropFirst(batchSize))
+            
+            if sendBatch(batch) {
+                // Success - continue with next batch
+                continue
+            } else {
+                // Failed - save remaining + current batch back to queue
+                let failed = batch + remaining
+                save(failed)
+                return
+            }
+        }
+        
+        // All batches sent successfully
+        save([])
     }
 
     private func getQueue() -> [AnalyticsEvent]? {
