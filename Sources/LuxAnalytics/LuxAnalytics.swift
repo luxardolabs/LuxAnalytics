@@ -102,13 +102,11 @@ public final class LuxAnalytics {
 
     public static func flush() {
         guard AnalyticsSettings.shared.isEnabled else { return }
-        shared.debugLog("Manual flush requested")
+        Self.shared.debugLog("Manual flush requested")  // ← Fixed: Self.shared instead of shared
         LuxAnalyticsQueue.shared.flushBatch(using: _sendBatch, batchSize: Config.batchSize)
     }
     
     public func enableDebugLogging(_ enabled: Bool) {
-        // This could override the plist setting for runtime debugging
-        // For now, we'll just rely on the plist configuration
         debugLog("Debug logging is controlled via LUX_DEBUG_LOGGING in Info.plist")
     }
     
@@ -121,7 +119,7 @@ public final class LuxAnalytics {
         }
         
         flushTimer = Timer.scheduledTimer(withTimeInterval: Config.autoFlushInterval, repeats: true) { _ in
-            shared.debugLog("Auto-flush timer triggered")
+            Self.shared.debugLog("Auto-flush timer triggered")  // ← Fixed: Self.shared
             LuxAnalytics.flush()
         }
         debugLog("Auto-flush timer set to \(Config.autoFlushInterval) seconds")
@@ -133,7 +131,7 @@ public final class LuxAnalytics {
             object: nil,
             queue: .main
         ) { _ in
-            shared.debugLog("App entering background, flushing events")
+            Self.shared.debugLog("App entering background, flushing events")  // ← Fixed: Self.shared
             LuxAnalytics.flush()
         }
         
@@ -142,7 +140,7 @@ public final class LuxAnalytics {
             object: nil,
             queue: .main
         ) { _ in
-            shared.debugLog("App terminating, flushing events")
+            Self.shared.debugLog("App terminating, flushing events")  // ← Fixed: Self.shared
             LuxAnalytics.flush()
         }
         
@@ -153,7 +151,7 @@ public final class LuxAnalytics {
         ) { _ in
             // Optional: flush any queued events when app becomes active
             if LuxAnalyticsQueue.shared.queueSize > 0 {
-                shared.debugLog("App became active with \(LuxAnalyticsQueue.shared.queueSize) queued events, flushing")
+                Self.shared.debugLog("App became active with \(LuxAnalyticsQueue.shared.queueSize) queued events, flushing")  // ← Fixed: Self.shared
                 LuxAnalytics.flush()
             }
         }
@@ -178,17 +176,15 @@ public final class LuxAnalytics {
         let payload: Data
         
         if asBatch && events.count > 1 {
-            // Send as batch: {"events": [...]}
             let batchPayload = ["events": events]
             guard let data = try? JSONEncoder().encode(batchPayload) else { 
-                shared.debugLog("Failed to encode batch payload")
+                Self.shared.debugLog("Failed to encode batch payload")  // ← Fixed: Self.shared
                 return false 
             }
             payload = data
         } else {
-            // Send as single event
             guard let data = try? JSONEncoder().encode(events.first!) else { 
-                shared.debugLog("Failed to encode single event payload")
+                Self.shared.debugLog("Failed to encode single event payload")  // ← Fixed: Self.shared
                 return false 
             }
             payload = data
@@ -196,7 +192,6 @@ public final class LuxAnalytics {
 
         let timestamp = String(Int(Date().timeIntervalSince1970))
         
-        // Create HMAC signature: payload + timestamp
         let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
         let message = payload + Data(timestamp.utf8)
         let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
@@ -211,22 +206,22 @@ public final class LuxAnalytics {
         req.httpBody = payload
         req.timeoutInterval = Config.requestTimeout
 
-        shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
+        Self.shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")  // ← Fixed: Self.shared
 
         let sema = DispatchSemaphore(value: 0)
         var success = false
 
         URLSession.shared.dataTask(with: req) { data, response, error in
             if let error = error {
-                shared.debugLog("Network error: \(error.localizedDescription)")
+                Self.shared.debugLog("Network error: \(error.localizedDescription)")  // ← Fixed: Self.shared
             } else if let http = response as? HTTPURLResponse {
                 success = (200..<300).contains(http.statusCode)
                 if success {
-                    shared.debugLog("Successfully sent \(events.count) event(s)")
+                    Self.shared.debugLog("Successfully sent \(events.count) event(s)")  // ← Fixed: Self.shared
                 } else {
-                    shared.debugLog("Server error: HTTP \(http.statusCode)")
+                    Self.shared.debugLog("Server error: HTTP \(http.statusCode)")  // ← Fixed: Self.shared
                     if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                        shared.debugLog("Response: \(responseString)")
+                        Self.shared.debugLog("Response: \(responseString)")  // ← Fixed: Self.shared
                     }
                 }
             }
