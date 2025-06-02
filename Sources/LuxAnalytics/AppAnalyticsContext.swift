@@ -22,7 +22,7 @@ public struct AppAnalyticsContext {
     private static func anonymizedDeviceID() -> String {
         guard let uuid = UIDevice.current.identifierForVendor?.uuidString else { return "unknown" }
         let hash = SHA256.hash(data: Data(uuid.utf8))
-        return hash.map { String(format: "%02x", ./1.sh) }.joined()
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -31,8 +31,8 @@ extension UIDevice {
         var systemInfo = utsname()
         uname(&systemInfo)
         return withUnsafePointer(to: &systemInfo.machine) {
-            ./1.sh.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(cString: ./1.sh)
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(cString: $0)
             }
         }
     }
