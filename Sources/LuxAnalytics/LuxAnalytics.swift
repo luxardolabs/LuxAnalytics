@@ -1,23 +1,79 @@
 import Foundation
 import CryptoKit
+import UIKit
 
 public final class LuxAnalytics {
     public static let shared = LuxAnalytics()
     private var currentUserId: String?
     private var currentSessionId: String?
+    private var flushTimer: Timer?
     
-    private init() {}
+    // Configuration - can be overridden in Info.plist
+    private struct Config {
+        static let autoFlushInterval: TimeInterval = {
+            if let interval = Bundle.main.object(forInfoDictionaryKey: "LUX_AUTO_FLUSH_INTERVAL") as? NSNumber {
+                return TimeInterval(interval.doubleValue)
+            }
+            return 30.0 // Default: 30 seconds
+        }()
+        
+        static let maxQueueSize: Int = {
+            if let size = Bundle.main.object(forInfoDictionaryKey: "LUX_MAX_QUEUE_SIZE") as? NSNumber {
+                return size.intValue
+            }
+            return 100 // Default: 100 events
+        }()
+        
+        static let batchSize: Int = {
+            if let size = Bundle.main.object(forInfoDictionaryKey: "LUX_BATCH_SIZE") as? NSNumber {
+                return size.intValue
+            }
+            return 10 // Default: 10 events per batch
+        }()
+        
+        static let isDebugLoggingEnabled: Bool = {
+            if let enabled = Bundle.main.object(forInfoDictionaryKey: "LUX_DEBUG_LOGGING") as? NSNumber {
+                return enabled.boolValue
+            }
+            return false // Default: disabled
+        }()
+        
+        static let requestTimeout: TimeInterval = {
+            if let timeout = Bundle.main.object(forInfoDictionaryKey: "LUX_REQUEST_TIMEOUT") as? NSNumber {
+                return TimeInterval(timeout.doubleValue)
+            }
+            return 10.0 // Default: 10 seconds
+        }()
+    }
+    
+    private init() {
+        setupAutoFlush()
+        setupAppLifecycleObservers()
+        debugLog("LuxAnalytics initialized with config: autoFlush=\(Config.autoFlushInterval)s, maxQueue=\(Config.maxQueueSize), batchSize=\(Config.batchSize)")
+    }
+    
+    deinit {
+        flushTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    // MARK: - Public API
     
     public func setUser(_ userId: String?) {
         self.currentUserId = userId
+        debugLog("User set: \(userId ?? "nil")")
     }
     
     public func setSession(_ sessionId: String?) {
         self.currentSessionId = sessionId
+        debugLog("Session set: \(sessionId ?? "nil")")
     }
 
     public func track(_ name: String, metadata: [String: String] = [:]) {
-        guard AnalyticsSettings.shared.isEnabled else { return }
+        guard AnalyticsSettings.shared.isEnabled else { 
+            debugLog("Analytics disabled, skipping event: \(name)")
+            return 
+        }
 
         var merged = AppAnalyticsContext.shared
         metadata.forEach { merged[$0] = $1 }
@@ -30,22 +86,90 @@ public final class LuxAnalytics {
             metadata: merged
         )
 
+        debugLog("Tracking event: \(name)")
+        
         if !LuxAnalytics._send(event) {
+            debugLog("Failed to send event \(name), adding to queue")
             LuxAnalyticsQueue.shared.enqueue(event)
+            
+            // Auto-flush if queue is getting full
+            if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
+                debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing")
+                LuxAnalytics.flush()
+            }
         }
     }
 
     public static func flush() {
         guard AnalyticsSettings.shared.isEnabled else { return }
-        LuxAnalyticsQueue.shared.flushBatch(using: _sendBatch)
+        shared.debugLog("Manual flush requested")
+        LuxAnalyticsQueue.shared.flushBatch(using: _sendBatch, batchSize: Config.batchSize)
+    }
+    
+    public func enableDebugLogging(_ enabled: Bool) {
+        // This could override the plist setting for runtime debugging
+        // For now, we'll just rely on the plist configuration
+        debugLog("Debug logging is controlled via LUX_DEBUG_LOGGING in Info.plist")
+    }
+    
+    // MARK: - Private Implementation
+    
+    private func setupAutoFlush() {
+        guard Config.autoFlushInterval > 0 else {
+            debugLog("Auto-flush disabled (interval = 0)")
+            return
+        }
+        
+        flushTimer = Timer.scheduledTimer(withTimeInterval: Config.autoFlushInterval, repeats: true) { _ in
+            shared.debugLog("Auto-flush timer triggered")
+            LuxAnalytics.flush()
+        }
+        debugLog("Auto-flush timer set to \(Config.autoFlushInterval) seconds")
+    }
+    
+    private func setupAppLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            shared.debugLog("App entering background, flushing events")
+            LuxAnalytics.flush()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            shared.debugLog("App terminating, flushing events")
+            LuxAnalytics.flush()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            // Optional: flush any queued events when app becomes active
+            if LuxAnalyticsQueue.shared.queueSize > 0 {
+                shared.debugLog("App became active with \(LuxAnalyticsQueue.shared.queueSize) queued events, flushing")
+                LuxAnalytics.flush()
+            }
+        }
+    }
+    
+    private func debugLog(_ message: String) {
+        guard Config.isDebugLoggingEnabled else { return }
+        print("[LuxAnalytics] \(message)")
     }
 
-    // Keep single event method
+    // MARK: - Network Implementation
+
     internal static func _send(_ event: AnalyticsEvent) -> Bool {
         return _sendEvents([event], asBatch: false)
     }
     
-    // New batch method
     internal static func _sendBatch(_ events: [AnalyticsEvent]) -> Bool {
         return _sendEvents(events, asBatch: true)
     }
@@ -56,19 +180,25 @@ public final class LuxAnalytics {
         if asBatch && events.count > 1 {
             // Send as batch: {"events": [...]}
             let batchPayload = ["events": events]
-            guard let data = try? JSONEncoder().encode(batchPayload) else { return false }
+            guard let data = try? JSONEncoder().encode(batchPayload) else { 
+                shared.debugLog("Failed to encode batch payload")
+                return false 
+            }
             payload = data
         } else {
             // Send as single event
-            guard let data = try? JSONEncoder().encode(events.first!) else { return false }
+            guard let data = try? JSONEncoder().encode(events.first!) else { 
+                shared.debugLog("Failed to encode single event payload")
+                return false 
+            }
             payload = data
         }
 
         let timestamp = String(Int(Date().timeIntervalSince1970))
         
-        // CRITICAL: Sign payload + timestamp (not just payload)
+        // Create HMAC signature: payload + timestamp
         let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
-        let message = payload + Data(timestamp.utf8)  // ← This was missing in original!
+        let message = payload + Data(timestamp.utf8)
         let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
         let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
 
@@ -79,18 +209,31 @@ public final class LuxAnalytics {
         req.setValue(AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
         req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
         req.httpBody = payload
+        req.timeoutInterval = Config.requestTimeout
+
+        shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
 
         let sema = DispatchSemaphore(value: 0)
         var success = false
 
-        URLSession.shared.dataTask(with: req) { _, res, _ in
-            if let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                success = true
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            if let error = error {
+                shared.debugLog("Network error: \(error.localizedDescription)")
+            } else if let http = response as? HTTPURLResponse {
+                success = (200..<300).contains(http.statusCode)
+                if success {
+                    shared.debugLog("Successfully sent \(events.count) event(s)")
+                } else {
+                    shared.debugLog("Server error: HTTP \(http.statusCode)")
+                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                        shared.debugLog("Response: \(responseString)")
+                    }
+                }
             }
             sema.signal()
         }.resume()
 
-        _ = sema.wait(timeout: .now() + 2)
+        _ = sema.wait(timeout: .now() + Config.requestTimeout + 1.0)
         return success
     }
 }
