@@ -70,9 +70,9 @@ public final class LuxAnalytics {
     }
 
     public func track(_ name: String, metadata: [String: String] = [:]) {
-        guard AnalyticsSettings.shared.isEnabled else { 
+        guard AnalyticsSettings.shared.isEnabled else {
             debugLog("Analytics disabled, skipping event: \(name)")
-            return 
+            return
         }
 
         var merged = AppAnalyticsContext.shared
@@ -86,20 +86,18 @@ public final class LuxAnalytics {
             metadata: merged
         )
 
-        debugLog("Tracking event: \(name)")
+        debugLog("Tracking event: \(name) - queuing for batch")
         
-        if !LuxAnalytics._send(event) {
-            debugLog("Failed to send event \(name), adding to queue")
-            LuxAnalyticsQueue.shared.enqueue(event)
-            
-            // Auto-flush if queue is getting full
-            if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
-                debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing")
-                LuxAnalytics.flush()
-            }
+        // Always queue events for batching - never send immediately
+        LuxAnalyticsQueue.shared.enqueue(event)
+        
+        // Auto-flush if queue is getting full
+        if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
+            debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing batch")
+            LuxAnalytics.flush()
         }
     }
-
+    
     public static func flush() {
         guard AnalyticsSettings.shared.isEnabled else { return }
         Self.shared.debugLog("Manual flush requested")  // ← Fixed: Self.shared instead of shared
