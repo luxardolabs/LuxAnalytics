@@ -2,7 +2,8 @@ import Foundation
 import UIKit
 import CryptoKit
 
-public struct AppAnalyticsContext {
+@MainActor
+public struct AppAnalyticsContext: Sendable {
     public static var shared: [String: String] {
         let size = UIScreen.main.bounds
         return [
