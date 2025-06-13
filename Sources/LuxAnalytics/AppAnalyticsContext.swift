@@ -2,8 +2,8 @@ import Foundation
 import UIKit
 import CryptoKit
 
-@MainActor
 public struct AppAnalyticsContext: Sendable {
+    @MainActor
     public static var shared: [String: String] {
         let size = UIScreen.main.bounds
         return [
@@ -20,6 +20,7 @@ public struct AppAnalyticsContext: Sendable {
         ]
     }
 
+    @MainActor
     private static func anonymizedDeviceID() -> String {
         guard let uuid = UIDevice.current.identifierForVendor?.uuidString else { return "unknown" }
         let hash = SHA256.hash(data: Data(uuid.utf8))
