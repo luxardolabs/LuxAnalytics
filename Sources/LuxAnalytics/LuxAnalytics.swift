@@ -2,8 +2,7 @@ import Foundation
 import CryptoKit
 import UIKit
 
-@MainActor
-public final class LuxAnalytics: Sendable {
+public final class LuxAnalytics: @unchecked Sendable {
     public static let shared = LuxAnalytics()
     private var currentUserId: String?
     private var currentSessionId: String?
@@ -71,32 +70,34 @@ public final class LuxAnalytics: Sendable {
     }
 
     public func track(_ name: String, metadata: [String: String] = [:]) {
-        guard AnalyticsSettings.shared.isEnabled else {
-            debugLog("Analytics disabled, skipping event: \(name)")
-            return
-        }
+        Task { @MainActor in
+            guard AnalyticsSettings.shared.isEnabled else {
+                debugLog("Analytics disabled, skipping event: \(name)")
+                return
+            }
 
-        var merged = AppAnalyticsContext.shared
-        metadata.forEach { merged[$0] = $1 }
+            var merged = AppAnalyticsContext.shared
+            metadata.forEach { merged[$0] = $1 }
 
-        let event = AnalyticsEvent(
-            name: name,
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: currentUserId,
-            sessionId: currentSessionId,
-            metadata: merged
-        )
+            let event = AnalyticsEvent(
+                name: name,
+                timestamp: ISO8601DateFormatter().string(from: Date()),
+                userId: currentUserId,
+                sessionId: currentSessionId,
+                metadata: merged
+            )
 
-        debugLog("Tracking event: \(name) - queuing for batch")
-        
-        // Always queue events for batching - never send immediately
-        LuxAnalyticsQueue.shared.enqueue(event)
-        
-        // Auto-flush if queue is getting full
-        if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
-            debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing batch")
-            Task {
-                await Self.flushAsync()
+            debugLog("Tracking event: \(name) - queuing for batch")
+            
+            // Always queue events for batching - never send immediately
+            LuxAnalyticsQueue.shared.enqueue(event)
+            
+            // Auto-flush if queue is getting full
+            if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
+                debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing batch")
+                Task {
+                    await Self.flushAsync()
+                }
             }
         }
     }
@@ -105,7 +106,8 @@ public final class LuxAnalytics: Sendable {
     
     // Modern async/await API
     public static func flushAsync() async {
-        guard await AnalyticsSettings.shared.isEnabled else { return }
+        let isEnabled = await MainActor.run { AnalyticsSettings.shared.isEnabled }
+        guard isEnabled else { return }
         await shared.debugLogAsync("Async flush requested")
         await LuxAnalyticsQueue.shared.flushBatch(using: _sendBatchAsync, batchSize: Config.batchSize)
     }
@@ -120,7 +122,8 @@ public final class LuxAnalytics: Sendable {
     // Background flush for older iOS versions
     public static func flushBackground(completion: @escaping () -> Void = {}) {
         Task {
-            guard await AnalyticsSettings.shared.isEnabled else {
+            let isEnabled = await MainActor.run { AnalyticsSettings.shared.isEnabled }
+            guard isEnabled else {
                 completion()
                 return
             }
@@ -248,16 +251,16 @@ public final class LuxAnalytics: Sendable {
 
         let timestamp = String(Int(Date().timeIntervalSince1970))
         
-        let key = SymmetricKey(data: Data(await AnalyticsConfig.hmacSecret.utf8))
+        let key = SymmetricKey(data: Data(await MainActor.run { AnalyticsConfig.hmacSecret }.utf8))
         let message = payload + Data(timestamp.utf8)
         let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
         let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
 
-        var req = URLRequest(url: await AnalyticsConfig.endpoint)
+        var req = URLRequest(url: await MainActor.run { AnalyticsConfig.endpoint })
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(signature, forHTTPHeaderField: "X-Signature")
-        req.setValue(await AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
+        req.setValue(await MainActor.run { AnalyticsConfig.keyId }, forHTTPHeaderField: "X-Key-ID")
         req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
         req.httpBody = payload
         req.timeoutInterval = Config.requestTimeout
