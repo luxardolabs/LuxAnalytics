@@ -1,6 +1,7 @@
 import Foundation
 
-public final class AnalyticsSettings {
+@MainActor
+public final class AnalyticsSettings: Sendable {
     public static let shared = AnalyticsSettings()
     private let key = "lux_analytics_enabled"
 

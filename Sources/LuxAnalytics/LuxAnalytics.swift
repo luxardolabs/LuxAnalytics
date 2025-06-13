@@ -2,7 +2,8 @@ import Foundation
 import CryptoKit
 import UIKit
 
-public final class LuxAnalytics {
+@MainActor
+public final class LuxAnalytics: Sendable {
     public static let shared = LuxAnalytics()
     private var currentUserId: String?
     private var currentSessionId: String?
@@ -94,14 +95,48 @@ public final class LuxAnalytics {
         // Auto-flush if queue is getting full
         if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
             debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing batch")
-            LuxAnalytics.flush()
+            Task {
+                await Self.flushAsync()
+            }
         }
     }
     
+    // MARK: - Flush Methods
+    
+    // Modern async/await API
+    public static func flushAsync() async {
+        guard await AnalyticsSettings.shared.isEnabled else { return }
+        await shared.debugLogAsync("Async flush requested")
+        await LuxAnalyticsQueue.shared.flushBatch(using: _sendBatchAsync, batchSize: Config.batchSize)
+    }
+    
+    // Legacy flush for backwards compatibility
     public static func flush() {
-        guard AnalyticsSettings.shared.isEnabled else { return }
-        Self.shared.debugLog("Manual flush requested")  // ← Fixed: Self.shared instead of shared
-        LuxAnalyticsQueue.shared.flushBatch(using: _sendBatch, batchSize: Config.batchSize)
+        Task {
+            await flushAsync()
+        }
+    }
+    
+    // Background flush for older iOS versions
+    public static func flushBackground(completion: @escaping () -> Void = {}) {
+        Task {
+            guard await AnalyticsSettings.shared.isEnabled else {
+                completion()
+                return
+            }
+            await shared.debugLogAsync("Background flush requested")
+            
+            if #available(iOS 15.0, *) {
+                await flushAsync()
+                completion()
+            } else {
+                LuxAnalyticsQueue.shared.flushBackground(
+                    using: _sendBatchBackground,
+                    batchSize: Config.batchSize,
+                    completion: completion
+                )
+            }
+        }
     }
     
     public func enableDebugLogging(_ enabled: Bool) {
@@ -117,8 +152,10 @@ public final class LuxAnalytics {
         }
         
         flushTimer = Timer.scheduledTimer(withTimeInterval: Config.autoFlushInterval, repeats: true) { _ in
-            Self.shared.debugLog("Auto-flush timer triggered")  // ← Fixed: Self.shared
-            LuxAnalytics.flush()
+            Task {
+                await Self.shared.debugLogAsync("Auto-flush timer triggered")
+                await Self.flushAsync()
+            }
         }
         debugLog("Auto-flush timer set to \(Config.autoFlushInterval) seconds")
     }
@@ -129,8 +166,10 @@ public final class LuxAnalytics {
             object: nil,
             queue: .main
         ) { _ in
-            Self.shared.debugLog("App entering background, flushing events")  // ← Fixed: Self.shared
-            LuxAnalytics.flush()
+            Task {
+                await Self.shared.debugLogAsync("App entering background, flushing events")
+                await Self.flushAsync()
+            }
         }
         
         NotificationCenter.default.addObserver(
@@ -138,8 +177,18 @@ public final class LuxAnalytics {
             object: nil,
             queue: .main
         ) { _ in
-            Self.shared.debugLog("App terminating, flushing events")  // ← Fixed: Self.shared
-            LuxAnalytics.flush()
+            // For app termination, we need to wait briefly for flush
+            let group = DispatchGroup()
+            group.enter()
+            
+            Task {
+                await Self.shared.debugLogAsync("App terminating, flushing events")
+                await Self.flushAsync()
+                group.leave()
+            }
+            
+            // Wait up to 2 seconds for flush to complete
+            _ = group.wait(timeout: .now() + 2.0)
         }
         
         NotificationCenter.default.addObserver(
@@ -147,10 +196,11 @@ public final class LuxAnalytics {
             object: nil,
             queue: .main
         ) { _ in
-            // Optional: flush any queued events when app becomes active
-            if LuxAnalyticsQueue.shared.queueSize > 0 {
-                Self.shared.debugLog("App became active with \(LuxAnalyticsQueue.shared.queueSize) queued events, flushing")  // ← Fixed: Self.shared
-                LuxAnalytics.flush()
+            Task {
+                if await LuxAnalyticsQueue.shared.queueSize > 0 {
+                    await Self.shared.debugLogAsync("App became active with \(await LuxAnalyticsQueue.shared.queueSize) queued events, flushing")
+                    await Self.flushAsync()
+                }
             }
         }
     }
@@ -159,74 +209,159 @@ public final class LuxAnalytics {
         guard Config.isDebugLoggingEnabled else { return }
         print("[LuxAnalytics] \(message)")
     }
+    
+    private func debugLogAsync(_ message: String) async {
+        guard Config.isDebugLoggingEnabled else { return }
+        await MainActor.run {
+            print("[LuxAnalytics] \(message)")
+        }
+    }
 
     // MARK: - Network Implementation
-
-    internal static func _send(_ event: AnalyticsEvent) -> Bool {
-        return _sendEvents([event], asBatch: false)
+    
+    // Modern async/await network implementation
+    private static func _sendBatchAsync(_ events: [AnalyticsEvent]) async -> Bool {
+        return await _sendEventsAsync(events, asBatch: true)
     }
     
-    internal static func _sendBatch(_ events: [AnalyticsEvent]) -> Bool {
-        return _sendEvents(events, asBatch: true)
+    private static func _sendEventAsync(_ event: AnalyticsEvent) async -> Bool {
+        return await _sendEventsAsync([event], asBatch: false)
     }
     
-    private static func _sendEvents(_ events: [AnalyticsEvent], asBatch: Bool) -> Bool {
+    private static func _sendEventsAsync(_ events: [AnalyticsEvent], asBatch: Bool) async -> Bool {
         let payload: Data
         
         if asBatch && events.count > 1 {
             let batchPayload = ["events": events]
-            guard let data = try? JSONEncoder().encode(batchPayload) else { 
-                Self.shared.debugLog("Failed to encode batch payload")  // ← Fixed: Self.shared
-                return false 
+            guard let data = try? JSONEncoder().encode(batchPayload) else {
+                await shared.debugLogAsync("Failed to encode batch payload")
+                return false
             }
             payload = data
         } else {
-            guard let data = try? JSONEncoder().encode(events.first!) else { 
-                Self.shared.debugLog("Failed to encode single event payload")  // ← Fixed: Self.shared
-                return false 
+            guard let data = try? JSONEncoder().encode(events.first!) else {
+                await shared.debugLogAsync("Failed to encode single event payload")
+                return false
             }
             payload = data
         }
 
         let timestamp = String(Int(Date().timeIntervalSince1970))
         
-        let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
+        let key = SymmetricKey(data: Data(await AnalyticsConfig.hmacSecret.utf8))
         let message = payload + Data(timestamp.utf8)
         let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
         let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
 
-        var req = URLRequest(url: AnalyticsConfig.endpoint)
+        var req = URLRequest(url: await AnalyticsConfig.endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(signature, forHTTPHeaderField: "X-Signature")
-        req.setValue(AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
+        req.setValue(await AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
         req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
         req.httpBody = payload
         req.timeoutInterval = Config.requestTimeout
 
-        Self.shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")  // ← Fixed: Self.shared
+        await shared.debugLogAsync("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
 
-        let sema = DispatchSemaphore(value: 0)
-        var success = false
-
-        URLSession.shared.dataTask(with: req) { data, response, error in
-            if let error = error {
-                Self.shared.debugLog("Network error: \(error.localizedDescription)")  // ← Fixed: Self.shared
-            } else if let http = response as? HTTPURLResponse {
-                success = (200..<300).contains(http.statusCode)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            
+            if let http = response as? HTTPURLResponse {
+                let success = (200..<300).contains(http.statusCode)
                 if success {
-                    Self.shared.debugLog("Successfully sent \(events.count) event(s)")  // ← Fixed: Self.shared
+                    await shared.debugLogAsync("Successfully sent \(events.count) event(s)")
                 } else {
-                    Self.shared.debugLog("Server error: HTTP \(http.statusCode)")  // ← Fixed: Self.shared
-                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                        Self.shared.debugLog("Response: \(responseString)")  // ← Fixed: Self.shared
+                    await shared.debugLogAsync("Server error: HTTP \(http.statusCode)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        await shared.debugLogAsync("Response: \(responseString)")
                     }
                 }
+                return success
             }
-            sema.signal()
-        }.resume()
+            return false
+        } catch {
+            await shared.debugLogAsync("Network error: \(error.localizedDescription)")
+            return false
+        }
+    }
+    
+    // Background implementation for older iOS versions
+    private static func _sendBatchBackground(_ events: [AnalyticsEvent], completion: @escaping (Bool) -> Void) {
+        _sendEventsBackground(events, asBatch: true, completion: completion)
+    }
+    
+    private static func _sendEventsBackground(_ events: [AnalyticsEvent], asBatch: Bool, completion: @escaping (Bool) -> Void) {
+        // Always perform network operations on background queue
+        DispatchQueue.global(qos: .utility).async {
+            let payload: Data
+            
+            if asBatch && events.count > 1 {
+                let batchPayload = ["events": events]
+                guard let data = try? JSONEncoder().encode(batchPayload) else {
+                    DispatchQueue.main.async {
+                        shared.debugLog("Failed to encode batch payload")
+                        completion(false)
+                    }
+                    return
+                }
+                payload = data
+            } else {
+                guard let data = try? JSONEncoder().encode(events.first!) else {
+                    DispatchQueue.main.async {
+                        shared.debugLog("Failed to encode single event payload")
+                        completion(false)
+                    }
+                    return
+                }
+                payload = data
+            }
 
-        _ = sema.wait(timeout: .now() + Config.requestTimeout + 1.0)
-        return success
+            let timestamp = String(Int(Date().timeIntervalSince1970))
+            
+            let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
+            let message = payload + Data(timestamp.utf8)
+            let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
+            let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
+
+            var req = URLRequest(url: AnalyticsConfig.endpoint)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(signature, forHTTPHeaderField: "X-Signature")
+            req.setValue(AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
+            req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
+            req.httpBody = payload
+            req.timeoutInterval = Config.requestTimeout
+
+            DispatchQueue.main.async {
+                shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
+            }
+
+            URLSession.shared.dataTask(with: req) { data, response, error in
+                var success = false
+                
+                if let error = error {
+                    DispatchQueue.main.async {
+                        shared.debugLog("Network error: \(error.localizedDescription)")
+                    }
+                } else if let http = response as? HTTPURLResponse {
+                    success = (200..<300).contains(http.statusCode)
+                    DispatchQueue.main.async {
+                        if success {
+                            shared.debugLog("Successfully sent \(events.count) event(s)")
+                        } else {
+                            shared.debugLog("Server error: HTTP \(http.statusCode)")
+                            if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                                shared.debugLog("Response: \(responseString)")
+                            }
+                        }
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    completion(success)
+                }
+            }.resume()
+        }
     }
 }

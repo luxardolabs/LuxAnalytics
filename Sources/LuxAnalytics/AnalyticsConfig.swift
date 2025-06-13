@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 public struct AnalyticsConfig {
     public static var endpoint: URL {
         guard let urlString = Bundle.main.object(forInfoDictionaryKey: "LUX_API_URL") as? String,
