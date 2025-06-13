@@ -563,7 +563,7 @@ LuxAnalytics.shared.track("purchase_completed", metadata: [
 
 ## 📄 License
 
-LuxAnalytics is available under the MIT license. See LICENSE file for details.
+LuxAnalytics is available under the GNU General Public License v3.0. See LICENSE file for details.
 
 ## 🆘 Support
 
