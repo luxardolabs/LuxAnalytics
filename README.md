@@ -17,7 +17,7 @@ A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with S
 - 🎨 **Highly Configurable** - Extensive configuration options
 - 🛡️ **Production Ready** - Battle-tested with comprehensive error handling
 
-### 🆕 New in v2025.6.26.0
+### 🆕 New in 2025.6.26.0
 
 - 🔐 **Thread-Safe Singleton** - Proper synchronization using NSLock
 - 🧪 **Working Test Suite** - All tests passing with proper teardown/setup
