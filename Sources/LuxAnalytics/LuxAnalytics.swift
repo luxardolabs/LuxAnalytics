@@ -196,7 +196,7 @@ public final class LuxAnalytics: Sendable {
         
         if config.compressionEnabled && payload.count >= config.compressionThreshold {
             let compressionStart = Date()
-            if let compressed = try? (payload as NSData).compressed(using: .gzip) as Data {
+            if let compressed = try? (payload as NSData).compressed(using: .zlib) as Data {
                 finalPayload = compressed
                 isCompressed = true
                 let compressionDuration = Date().timeIntervalSince(compressionStart)
@@ -220,7 +220,7 @@ public final class LuxAnalytics: Sendable {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if isCompressed {
-            req.setValue("gzip", forHTTPHeaderField: "Content-Encoding")
+            req.setValue("deflate", forHTTPHeaderField: "Content-Encoding")
         }
         req.setValue(signature, forHTTPHeaderField: "X-HMAC-Signature")
         req.setValue(config.keyID, forHTTPHeaderField: "X-Key-ID")
