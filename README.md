@@ -746,14 +746,13 @@ func testAnalyticsTracking() async {
 }
 ```
 
-## 🔄 Migration from Other Analytics SDKs
+## 🔄 Version Migration Guide
 
-See [MIGRATION.md](MIGRATION.md) for detailed migration guides from:
-- Google Analytics
-- Firebase Analytics
-- Mixpanel
-- Amplitude
-- Custom analytics solutions
+See [MIGRATION.md](MIGRATION.md) for detailed guides on:
+- Migrating from previous versions of LuxAnalytics
+- Breaking changes between versions
+- New helper methods for easier migration
+- Common migration issues and solutions
 
 ## 📋 Requirements
 
