@@ -73,6 +73,9 @@ fastlane/test_output
 .AppleDouble
 .LSOverride
 
+# Development
+CLAUDE.md
+
 # Icon must end with two \r
 Icon
 
