@@ -1,7 +1,27 @@
 import Foundation
 
 /// Errors that can occur in LuxAnalytics
-public enum LuxAnalyticsError: LocalizedError {
+public enum LuxAnalyticsError: LocalizedError, Equatable {
+    public static func == (lhs: LuxAnalyticsError, rhs: LuxAnalyticsError) -> Bool {
+        switch (lhs, rhs) {
+        case (.alreadyInitialized, .alreadyInitialized),
+             (.notInitialized, .notInitialized),
+             (.analyticsDisabled, .analyticsDisabled):
+            return true
+        case (.invalidConfiguration(let lhsMsg), .invalidConfiguration(let rhsMsg)):
+            return lhsMsg == rhsMsg
+        case (.queueError(let lhsMsg), .queueError(let rhsMsg)):
+            return lhsMsg == rhsMsg
+        case (.serverError(let lhsCode, let lhsResponse), .serverError(let rhsCode, let rhsResponse)):
+            return lhsCode == rhsCode && lhsResponse == rhsResponse
+        case (.networkError(let lhsError), .networkError(let rhsError)),
+             (.encodingError(let lhsError), .encodingError(let rhsError)):
+            return (lhsError as NSError) == (rhsError as NSError)
+        default:
+            return false
+        }
+    }
+    
     /// LuxAnalytics has already been initialized
     case alreadyInitialized
     
