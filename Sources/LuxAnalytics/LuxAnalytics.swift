@@ -196,7 +196,7 @@ public final class LuxAnalytics: Sendable {
         
         if config.compressionEnabled && payload.count >= config.compressionThreshold {
             let compressionStart = Date()
-            if let compressed = try? (payload as NSData).compressed(using: .zlib) as Data {
+            if let compressed = try? (payload as NSData).compressed(using: .gzip) as Data {
                 finalPayload = compressed
                 isCompressed = true
                 let compressionDuration = Date().timeIntervalSince(compressionStart)
