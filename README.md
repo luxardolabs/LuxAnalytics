@@ -507,6 +507,55 @@ let config = LuxAnalyticsConfiguration(
 )
 ```
 
+### HMAC Signature & Compression
+
+LuxAnalytics uses HMAC-SHA256 signatures to ensure data integrity and authenticity. When compression is enabled, the signature is calculated on the **compressed payload**, providing several benefits:
+
+#### How It Works:
+1. **Event Encoding**: Events are encoded to JSON
+2. **Compression** (if enabled): Payload is compressed using zlib (deflate)
+3. **HMAC Signature**: Calculated as `HMAC-SHA256(compressed_payload + timestamp)`
+4. **Headers Sent**:
+   - `X-HMAC-Signature`: The hex-encoded signature
+   - `X-Key-ID`: Your key identifier
+   - `X-Timestamp`: Unix timestamp used in signature
+   - `Content-Encoding`: "deflate" (only if compressed)
+
+#### Server-Side Verification:
+Your server must handle the verification in this specific order:
+
+```swift
+// Example server-side verification (pseudo-code)
+func verifyRequest(body: Data, headers: Headers) -> Bool {
+    // 1. Extract headers
+    let signature = headers["X-HMAC-Signature"]
+    let timestamp = headers["X-Timestamp"]
+    let keyID = headers["X-Key-ID"]
+    let isCompressed = headers["Content-Encoding"] == "deflate"
+    
+    // 2. Verify timestamp is recent (prevent replay attacks)
+    guard isTimestampRecent(timestamp, maxAge: 300) else { return false }
+    
+    // 3. Calculate expected signature on RAW body (compressed if applicable)
+    let message = body + timestamp.data(using: .utf8)!
+    let expectedSignature = HMAC.SHA256(message, key: lookupKey(keyID))
+    
+    // 4. Verify signature BEFORE decompression
+    guard signature == expectedSignature else { return false }
+    
+    // 5. Only decompress after verification succeeds
+    let payload = isCompressed ? decompress(body) : body
+    
+    return true
+}
+```
+
+#### Best Practices:
+- **Security**: Signature on compressed data ensures the compressed payload wasn't tampered with
+- **Performance**: Reduces bandwidth while maintaining security
+- **Compatibility**: Servers must verify compressed data, not decompressed data
+- **Debugging**: Log compression ratio and signature verification failures separately
+
 ## 🔧 Advanced Configuration
 
 ### Full Configuration Options
@@ -531,7 +580,7 @@ let config = LuxAnalyticsConfiguration(
     overflowStrategy: .dropOldest,  // What to do when queue is full (default: .dropOldest)
     
     // Compression
-    compressionEnabled: true,       // Enable gzip compression (default: true)
+    compressionEnabled: true,       // Enable zlib compression (default: true)
     compressionThreshold: 1024,     // Compress if payload > 1KB (default: 1024)
     
     // Debugging
