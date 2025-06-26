@@ -7,13 +7,48 @@ import UIKit
 /// Main analytics tracking class
 /// This class must be initialized with a configuration before use
 public final class LuxAnalytics: Sendable {
+    /// Thread-safe storage for shared instance
+    internal static let lock = NSLock()
+    nonisolated(unsafe) internal static var _instance: LuxAnalytics?
+    
+    /// URLSession with certificate pinning (if configured)
+    private static var urlSession: URLSession {
+        let config = LuxAnalyticsConfiguration.current
+        return URLSession.analyticsSession(with: config?.certificatePinning)
+    }
+    
     /// Shared instance - only available after initialization
-    nonisolated(unsafe) private static var _shared: LuxAnalytics?
     public static var shared: LuxAnalytics {
-        guard let instance = _shared else {
-            fatalError("LuxAnalytics.initialize() must be called before accessing shared instance")
+        lock.lock()
+        defer { lock.unlock() }
+        
+        guard let instance = _instance else {
+            // Provide helpful debugging info
+            let callStack = Thread.callStackSymbols.prefix(10).joined(separator: "\n")
+            fatalError("""
+                
+                ⚠️ LuxAnalytics.initialize() must be called before accessing shared instance.
+                
+                This usually happens when:
+                1. A @StateObject initializer uses LuxAnalytics
+                2. A static property initializes before your App.init()
+                3. A singleton's init() method tracks analytics
+                
+                Fix: Move LuxAnalytics.initialize() earlier in your app lifecycle.
+                See: https://github.com/luxardolabs/LuxAnalytics#initialization-order
+                
+                Call stack:
+                \(callStack)
+                """)
         }
         return instance
+    }
+    
+    /// Internal access for extensions
+    internal static var _shared: LuxAnalytics? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _instance
     }
     
     private let analyticsActor: AnalyticsActor
@@ -22,17 +57,22 @@ public final class LuxAnalytics: Sendable {
     /// - Parameter configuration: The analytics configuration
     /// - Throws: Throws if already initialized
     public static func initialize(with configuration: LuxAnalyticsConfiguration) throws {
-        guard _shared == nil else {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        guard _instance == nil else {
             throw LuxAnalyticsError.alreadyInitialized
         }
         
         LuxAnalyticsConfiguration.current = configuration
-        _shared = LuxAnalytics(configuration: configuration)
+        _instance = LuxAnalytics(configuration: configuration)
     }
     
     /// Check if LuxAnalytics is initialized
     public static var isInitialized: Bool {
-        return _shared != nil
+        lock.lock()
+        defer { lock.unlock() }
+        return _instance != nil
     }
     
     private init(configuration: LuxAnalyticsConfiguration) {
@@ -197,7 +237,7 @@ public final class LuxAnalytics: Sendable {
         )
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await urlSession.data(for: req)
             
             if let http = response as? HTTPURLResponse {
                 let success = (200..<300).contains(http.statusCode)

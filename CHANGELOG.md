@@ -5,6 +5,35 @@ All notable changes to LuxAnalytics will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2025.6.26.0] - 2025-06-26
+
+### Added
+- Lazy initialization support with `setPendingConfiguration()` and `lazyShared`
+- Safe optional access with `sharedIfInitialized`
+- Quick start method `quickStart()` for simple configurations
+- Debug utilities in `LuxAnalyticsDebug` for troubleshooting initialization
+- Better error messages with detailed debugging information
+- Compatibility helpers for common migration mistakes
+- Comprehensive security documentation (SECURITY.md)
+- Thread-safe singleton implementation using NSLock
+
+### Fixed
+- Race condition in singleton initialization
+- Certificate pinning now properly integrated in networking layer
+- All unit tests now passing with proper setup/teardown
+- Thread-safety issues with static properties
+
+### Improved
+- Fatal error messages now include helpful debugging information and common fixes
+- Added call stack traces to initialization errors
+- Documentation updates for initialization best practices
+- Security model documentation with threat analysis
+
+### Security
+- Certificate pinning is now active when configured
+- Proper thread synchronization prevents race conditions
+- Enhanced documentation of security best practices
+
 ## [1.0.0-beta.1] - 2025-06-25
 
 ### Added

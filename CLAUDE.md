@@ -19,30 +19,31 @@ LuxAnalytics is a production-ready iOS analytics SDK written in Swift that provi
 - Network framework for connectivity monitoring
 - Compression support for large payloads
 
+## CRITICAL: THIS IS AN iOS-ONLY PACKAGE!
+
+**Platform**: iOS 18+ ONLY (see Package.swift: `platforms: [.iOS(.v18)]`)
+- **DO NOT** use `swift build` - it tries to build for macOS and will fail
+- **ALWAYS** use Xcode commands for iOS targets
+- **DO NOT** try to "fix" iOS-specific code to work on macOS
+
 ## Build and Development Commands
 
 ### Building
 ```bash
-# Build the library
-swift build
+# BUILD FOR iOS (CORRECT):
+xcodebuild -scheme LuxAnalytics -destination 'platform=iOS Simulator,name=iPhone 16' build
 
-# Build for release
-swift build -c release
-
-# Clean build
-swift build --clean
+# DO NOT USE:
+# swift build  <- This tries to build for macOS and will fail!
 ```
 
 ### Testing
 ```bash
-# Run all tests
-swift test
+# TEST FOR iOS:
+xcodebuild test -scheme LuxAnalytics -destination 'platform=iOS Simulator,name=iPhone 16'
 
-# Run specific test
-swift test --filter LuxAnalyticsTests.LuxAnalyticsTests/testExample
-
-# Run tests with verbose output
-swift test --verbose
+# DO NOT USE:
+# swift test  <- This tries to test for macOS and will fail!
 ```
 
 ### Linting

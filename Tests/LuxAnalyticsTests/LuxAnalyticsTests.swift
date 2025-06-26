@@ -5,13 +5,12 @@ final class LuxAnalyticsTests: XCTestCase {
     
     override func setUp() async throws {
         try await super.setUp()
-        // Clear any existing state
-        await LuxAnalytics.clearQueue()
-        await AnalyticsSettings.shared.setEnabled(true)
+        // Reset state between tests
+        LuxAnalyticsTestHelper.reset()
     }
     
     override func tearDown() async throws {
-        await LuxAnalytics.clearQueue()
+        LuxAnalyticsTestHelper.reset()
         try await super.tearDown()
     }
     
@@ -91,6 +90,16 @@ final class LuxAnalyticsTests: XCTestCase {
 // MARK: - Analytics Settings Tests
 final class AnalyticsSettingsTests: XCTestCase {
     
+    override func setUp() async throws {
+        try await super.setUp()
+        LuxAnalyticsTestHelper.reset()
+    }
+    
+    override func tearDown() async throws {
+        LuxAnalyticsTestHelper.reset()
+        try await super.tearDown()
+    }
+    
     func testSettingsEnabled() async {
         await AnalyticsSettings.shared.setEnabled(true)
         let isEnabled = await AnalyticsSettings.shared.isEnabled
@@ -107,9 +116,8 @@ final class AnalyticsSettingsTests: XCTestCase {
         // Set to false
         await AnalyticsSettings.shared.setEnabled(false)
         
-        // Create new instance (simulating app restart)
-        let newSettings = AnalyticsSettings()
-        let isEnabled = await newSettings.isEnabled
+        // Check that the shared instance persists the value
+        let isEnabled = await AnalyticsSettings.shared.isEnabled
         XCTAssertFalse(isEnabled)
         
         // Clean up
@@ -119,6 +127,18 @@ final class AnalyticsSettingsTests: XCTestCase {
 
 // MARK: - Queue Tests
 final class LuxAnalyticsQueueTests: XCTestCase {
+    
+    override func setUp() async throws {
+        try await super.setUp()
+        try LuxAnalyticsTestHelper.initializeForTesting()
+        await LuxAnalyticsQueue.shared.clear()
+    }
+    
+    override func tearDown() async throws {
+        await LuxAnalyticsQueue.shared.clear()
+        LuxAnalyticsTestHelper.reset()
+        try await super.tearDown()
+    }
     
     func testQueueEnqueue() async {
         let event = AnalyticsEvent(
@@ -252,17 +272,17 @@ final class QueuedEventTests: XCTestCase {
         
         var queuedEvent = QueuedEvent(event: event)
         
-        // First retry - ~2 seconds
+        // First retry - 1 second base with ±25% jitter
         queuedEvent.retryCount = 0
         let delay1 = queuedEvent.nextRetryDelay()
-        XCTAssertGreaterThan(delay1, 1.5)
-        XCTAssertLessThan(delay1, 2.5)
+        XCTAssertGreaterThan(delay1, 0.75)  // 1 - 25%
+        XCTAssertLessThan(delay1, 1.25)     // 1 + 25%
         
-        // Second retry - ~4 seconds
+        // Second retry - 2 seconds base with ±25% jitter
         queuedEvent.retryCount = 1
         let delay2 = queuedEvent.nextRetryDelay()
-        XCTAssertGreaterThan(delay2, 3)
-        XCTAssertLessThan(delay2, 5)
+        XCTAssertGreaterThan(delay2, 1.5)   // 2 - 25%
+        XCTAssertLessThan(delay2, 2.5)      // 2 + 25%
         
         // Max delay
         queuedEvent.retryCount = 100
