@@ -13,10 +13,8 @@ struct LuxAnalyticsTestHelper {
     
     static func initializeForTesting() throws {
         reset()
-        let config = LuxAnalyticsConfiguration(
-            apiURL: URL(string: "https://test.com/events")!,
-            hmacSecret: "test-secret",
-            keyID: "test-key"
+        let config = try LuxAnalyticsConfiguration(
+            dsn: "https://test-public-id@test.com/api/v1/events/test-project-id"
         )
         try LuxAnalytics.initialize(with: config)
     }

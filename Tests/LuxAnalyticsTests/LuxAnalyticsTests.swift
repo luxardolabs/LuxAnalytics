@@ -17,10 +17,8 @@ final class LuxAnalyticsTests: XCTestCase {
     // MARK: - Configuration Tests
     
     func testInitialization() throws {
-        let config = LuxAnalyticsConfiguration(
-            apiURL: URL(string: "https://test.com/events")!,
-            hmacSecret: "test-secret",
-            keyID: "test-key"
+        let config = try LuxAnalyticsConfiguration(
+            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
         )
         
         XCTAssertNoThrow(try LuxAnalytics.initialize(with: config))
@@ -28,10 +26,8 @@ final class LuxAnalyticsTests: XCTestCase {
     }
     
     func testDoubleInitializationThrows() throws {
-        let config = LuxAnalyticsConfiguration(
-            apiURL: URL(string: "https://test.com/events")!,
-            hmacSecret: "test-secret",
-            keyID: "test-key"
+        let config = try LuxAnalyticsConfiguration(
+            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
         )
         
         try LuxAnalytics.initialize(with: config)
@@ -42,10 +38,8 @@ final class LuxAnalyticsTests: XCTestCase {
     }
     
     func testDefaultConfiguration() {
-        let config = LuxAnalyticsConfiguration(
-            apiURL: URL(string: "https://test.com/events")!,
-            hmacSecret: "test-secret",
-            keyID: "test-key"
+        let config = try LuxAnalyticsConfiguration(
+            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
         )
         
         XCTAssertEqual(config.autoFlushInterval, LuxAnalyticsDefaults.autoFlushInterval)
@@ -60,10 +54,8 @@ final class LuxAnalyticsTests: XCTestCase {
     }
     
     func testCustomConfiguration() {
-        let config = LuxAnalyticsConfiguration(
-            apiURL: URL(string: "https://test.com/events")!,
-            hmacSecret: "test-secret",
-            keyID: "test-key",
+        let config = try LuxAnalyticsConfiguration(
+            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id",
             autoFlushInterval: 60,
             maxQueueSize: 200,
             batchSize: 20,
@@ -84,6 +76,43 @@ final class LuxAnalyticsTests: XCTestCase {
         XCTAssertEqual(config.eventTTL, 86400)
         XCTAssertEqual(config.maxRetryAttempts, 3)
         XCTAssertEqual(config.overflowStrategy, .dropNewest)
+    }
+    
+    func testDSNParsing() throws {
+        let dsn = "https://a1b2c3d4e5f6@analytics.example.com/api/v1/events/1234567890123456"
+        let config = try LuxAnalyticsConfiguration(dsn: dsn)
+        
+        XCTAssertEqual(config.dsn, dsn)
+        XCTAssertEqual(config.publicId, "a1b2c3d4e5f6")
+        XCTAssertEqual(config.projectId, "1234567890123456")
+        XCTAssertEqual(config.apiURL.absoluteString, "https://analytics.example.com/api/v1/events/")
+    }
+    
+    func testInvalidDSNThrows() {
+        // Missing public ID
+        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "https://analytics.example.com/api/v1/events/123")) { error in
+            guard case LuxAnalyticsError.invalidConfiguration(let message) = error else {
+                XCTFail("Expected invalidConfiguration error")
+                return
+            }
+            XCTAssertTrue(message.contains("Invalid DSN format"))
+        }
+        
+        // Missing project ID
+        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "https://public-id@analytics.example.com/api/v1/events/")) { error in
+            guard case LuxAnalyticsError.invalidConfiguration = error else {
+                XCTFail("Expected invalidConfiguration error")
+                return
+            }
+        }
+        
+        // Invalid URL
+        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "not-a-url")) { error in
+            guard case LuxAnalyticsError.invalidConfiguration = error else {
+                XCTFail("Expected invalidConfiguration error")
+                return
+            }
+        }
     }
 }
 

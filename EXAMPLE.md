@@ -8,10 +8,8 @@ This SDK requires iOS 18+ and Swift 6.
 import LuxAnalytics
 
 // Initialize at app startup
-let config = LuxAnalyticsConfiguration(
-    apiURL: URL(string: "https://analytics.example.com/v1/events")!,
-    keyID: "your-key-id",
-    hmacSecret: "your-hmac-secret"
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id"
 )
 
 try LuxAnalytics.initialize(with: config)
@@ -67,11 +65,11 @@ Task {
 ## User & Session Management
 
 ```swift
-// Set user ID
-await LuxAnalytics.shared.setUser("user-12345")
+// Set user ID (synchronous, no await needed)
+LuxAnalytics.shared.setUser("user-12345")
 
-// Set session ID
-await LuxAnalytics.shared.setSession("session-abc")
+// Set session ID (synchronous, no await needed)
+LuxAnalytics.shared.setSession("session-abc")
 ```
 
 ## Manual Flush
@@ -96,10 +94,8 @@ func application(_ application: UIApplication, didFinishLaunchingWithOptions lau
 ## Configuration Options
 
 ```swift
-let config = LuxAnalyticsConfiguration(
-    apiURL: URL(string: "https://analytics.example.com/v1/events")!,
-    keyID: "your-key-id",
-    hmacSecret: "your-hmac-secret",
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id",
     batchSize: 100,                    // Events per batch
     autoFlushInterval: 30,             // Seconds
     maxQueueSize: 1000,                // Maximum queued events
