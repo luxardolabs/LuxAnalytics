@@ -215,10 +215,8 @@ public extension LuxAnalytics {
             guard let config = LuxAnalyticsConfiguration.current else { return }
             
             // Create a new config with debug logging enabled
-            let debugConfig = LuxAnalyticsConfiguration(
-                apiURL: config.apiURL,
-                hmacSecret: config.hmacSecret,
-                keyID: config.keyID,
+            guard let debugConfig = try? LuxAnalyticsConfiguration(
+                dsn: config.dsn,
                 autoFlushInterval: config.autoFlushInterval,
                 maxQueueSize: config.maxQueueSize,
                 batchSize: config.batchSize,
@@ -229,8 +227,9 @@ public extension LuxAnalytics {
                 maxRetryAttempts: config.maxRetryAttempts,
                 overflowStrategy: config.overflowStrategy,
                 compressionEnabled: config.compressionEnabled,
-                compressionThreshold: config.compressionThreshold
-            )
+                compressionThreshold: config.compressionThreshold,
+                certificatePinning: config.certificatePinning
+            ) else { return }
             
             LuxAnalyticsConfiguration.current = debugConfig
         }

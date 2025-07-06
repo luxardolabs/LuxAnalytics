@@ -6,19 +6,19 @@ public enum LuxAnalyticsDefaults {
     public static let autoFlushInterval: TimeInterval = 30.0
     
     /// Maximum queue size before forced flush (soft limit)
-    public static let maxQueueSize: Int = 100
+    public static let maxQueueSize: Int = 500
     
     /// Number of events per batch
-    public static let batchSize: Int = 10
+    public static let batchSize: Int = 50
     
     /// Enable debug logging
     public static let debugLogging: Bool = false
     
     /// Network request timeout in seconds
-    public static let requestTimeout: TimeInterval = 10.0
+    public static let requestTimeout: TimeInterval = 60.0
     
     /// Maximum queue size before dropping events (hard limit)
-    public static let maxQueueSizeHard: Int = 500
+    public static let maxQueueSizeHard: Int = 10000
     
     /// Event time-to-live in seconds (7 days)
     public static let eventTTL: TimeInterval = 604800

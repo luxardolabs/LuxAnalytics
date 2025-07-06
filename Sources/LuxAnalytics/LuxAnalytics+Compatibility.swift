@@ -30,17 +30,22 @@ extension LuxAnalytics {
     /// Configure and initialize LuxAnalytics in one call
     /// Useful for simple configurations
     public static func quickStart(
-        apiURL: URL,
-        hmacSecret: String,
-        keyID: String,
+        dsn: String,
         debugLogging: Bool = false
     ) throws {
-        let config = LuxAnalyticsConfiguration(
-            apiURL: apiURL,
-            hmacSecret: hmacSecret,
-            keyID: keyID,
+        let config = try LuxAnalyticsConfiguration(
+            dsn: dsn,
             debugLogging: debugLogging
         )
+        try initialize(with: config)
+    }
+    
+    /// Initialize LuxAnalytics from Info.plist configuration
+    /// Reads LuxAnalyticsDSN and optional configuration from Info.plist
+    /// - Parameter bundle: The bundle to read from (defaults to main bundle)
+    /// - Throws: LuxAnalyticsError if DSN is not found or already initialized
+    public static func initializeFromPlist(bundle: Bundle = .main) throws {
+        let config = try LuxAnalyticsConfiguration(bundle: bundle)
         try initialize(with: config)
     }
 }

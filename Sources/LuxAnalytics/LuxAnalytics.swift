@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -209,22 +208,24 @@ public final class LuxAnalytics: Sendable {
             finalPayload = payload
         }
         
-        let timestamp = String(Int(Date().timeIntervalSince1970))
+        // Construct URL with project ID
+        let endpointURL = config.apiURL.appendingPathComponent(config.projectId)
         
-        let key = SymmetricKey(data: Data(config.hmacSecret.utf8))
-        let message = finalPayload + Data(timestamp.utf8)
-        let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
-        let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
-
-        var req = URLRequest(url: config.apiURL)
+        // Create Basic Auth header
+        let authString = "\(config.publicId):"
+        guard let authData = authString.data(using: .utf8) else {
+            await instance.analyticsActor.debugLog("Failed to create auth data")
+            return false
+        }
+        let base64Auth = authData.base64EncodedString()
+        
+        var req = URLRequest(url: endpointURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if isCompressed {
             req.setValue("deflate", forHTTPHeaderField: "Content-Encoding")
         }
-        req.setValue(signature, forHTTPHeaderField: "X-HMAC-Signature")
-        req.setValue(config.keyID, forHTTPHeaderField: "X-Key-ID")
-        req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
+        req.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
         req.httpBody = finalPayload
         req.timeoutInterval = config.requestTimeout
 

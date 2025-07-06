@@ -8,23 +8,25 @@ LuxAnalytics is designed with security as a core principle. All data transmissio
 
 ## Security Features
 
-### 1. HMAC-SHA256 Request Authentication
+### 1. DSN-Based Authentication
 
-Every request to the analytics API is authenticated using HMAC-SHA256:
+Every request to the analytics API is authenticated using Basic Authentication derived from the DSN:
 
-- **Algorithm**: HMAC-SHA256
-- **Message**: Request body + timestamp
-- **Headers**: 
-  - `X-HMAC-Signature`: The computed HMAC signature
-  - `X-Key-ID`: The API key identifier
-  - `X-Timestamp`: Unix timestamp for replay protection
+- **DSN Format**: `https://publicId@domain.com/api/v1/events/projectId`
+- **Authentication**: HTTP Basic Auth
+- **Header**: `Authorization: Basic base64(publicId:)`
 
 **Implementation**:
 ```swift
-let key = SymmetricKey(data: Data(config.hmacSecret.utf8))
-let message = payload + Data(timestamp.utf8)
-let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
-let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
+// Parse DSN to extract public ID
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id"
+)
+
+// Basic Auth is automatically handled by the SDK
+let authString = "\(config.publicId):"
+let base64Auth = authString.data(using: .utf8)!.base64EncodedString()
+// Results in: Authorization: Basic base64Auth
 ```
 
 ### 2. Queue Encryption (AES-GCM)
@@ -66,8 +68,8 @@ let certificatePinning = CertificatePinningConfig(
     validateChain: true
 )
 
-let config = LuxAnalyticsConfiguration(
-    // ... other config ...
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://publicId@domain.com/api/v1/events/projectId",
     certificatePinning: certificatePinning
 )
 ```
@@ -110,7 +112,7 @@ All SDK logs automatically redact sensitive information:
 ### 6. Network Security
 
 - **TLS**: Minimum TLS 1.2 required (iOS enforced)
-- **Compression**: Optional gzip compression for large payloads
+- **Compression**: Optional zlib/deflate compression for large payloads
 - **Timeouts**: Configurable request timeouts (default 30s)
 - **Retry Logic**: Exponential backoff with jitter
 - **Circuit Breaker**: Prevents hammering failed endpoints
@@ -120,16 +122,16 @@ All SDK logs automatically redact sensitive information:
 ### 1. Credential Storage
 
 **❌ NEVER**:
-- Store credentials in Info.plist
-- Commit secrets to source control
-- Store credentials in UserDefaults
-- Hard-code credentials in source code
+- Store DSN strings with sensitive project IDs in Info.plist
+- Commit production DSN strings to source control
+- Store DSN in UserDefaults for production
+- Hard-code production DSN in source code
 
 **✅ ALWAYS**:
-- Use iOS Keychain for credential storage
+- Use iOS Keychain for production DSN storage
 - Use environment injection for CI/CD
-- Rotate credentials regularly
-- Use separate credentials for development/production
+- Rotate public IDs regularly
+- Use separate DSN strings for development/production
 
 **Example Keychain Storage**:
 ```swift
@@ -182,10 +184,8 @@ func optOutOfAnalytics() {
 
 **Example**:
 ```swift
-let config = LuxAnalyticsConfiguration(
-    apiURL: isProduction ? prodURL : devURL,
-    hmacSecret: getFromKeychain(isProduction ? "prod_secret" : "dev_secret"),
-    keyID: getFromKeychain(isProduction ? "prod_key" : "dev_key"),
+let config = try LuxAnalyticsConfiguration(
+    dsn: isProduction ? getFromKeychain("prod_dsn") : "https://dev@staging.example.com/api/v1/events/dev-project",
     debugLogging: !isProduction,
     certificatePinning: isProduction ? certificatePinning : nil
 )
@@ -199,12 +199,13 @@ let config = LuxAnalyticsConfiguration(
 **Mitigation**: 
 - TLS encryption (enforced by iOS)
 - Certificate pinning (optional)
-- HMAC signature validation
+- Basic authentication validation
 
 **Threat**: Replay attacks
 **Mitigation**: 
-- Timestamp validation on server
+- HTTPS/TLS encryption
 - Event deduplication by ID
+- Server-side rate limiting
 
 ### 2. Local Storage Attacks
 
@@ -224,7 +225,8 @@ let config = LuxAnalyticsConfiguration(
 
 **Threat**: Malicious event injection
 **Mitigation**: 
-- HMAC authentication
+- Basic authentication via DSN
+- Project ID validation in URL
 - Input validation
 - Rate limiting (server-side)
 
@@ -262,8 +264,8 @@ Before deploying to production:
 - [ ] Data retention policy defined
 - [ ] Security headers configured on API
 - [ ] Rate limiting enabled on API
-- [ ] Timestamp validation on API
-- [ ] HMAC validation on API
+- [ ] Request validation on API
+- [ ] Basic auth validation on API
 
 ## Incident Response
 

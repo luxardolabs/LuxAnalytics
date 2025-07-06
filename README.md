@@ -8,7 +8,7 @@ A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with S
 - ⚡ **Zero Main Thread Blocking** - All network operations are fully asynchronous  
 - 🎯 **iOS 18+ & Swift 6 Required** - Built exclusively with modern Swift concurrency
 - 📦 **Smart Event Batching** - Intelligent batching with retry logic and exponential backoff
-- 🔐 **HMAC Authentication** - Secure event transmission with cryptographic signatures
+- 🔐 **Secure Authentication** - DSN-based authentication with Basic Auth
 - 🚀 **Auto-Flush Management** - Handles app lifecycle events automatically
 - 💾 **Persistent Queue** - Events persist across app launches with TTL and size limits
 - 📡 **Offline Support** - Network-aware with automatic retry when connectivity returns
@@ -17,15 +17,6 @@ A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with S
 - 🎨 **Highly Configurable** - Extensive configuration options
 - 🛡️ **Production Ready** - Battle-tested with comprehensive error handling
 
-### 🆕 New in 2025.6.26.0
-
-- 🔐 **Thread-Safe Singleton** - Proper synchronization using NSLock
-- 🧪 **Working Test Suite** - All tests passing with proper teardown/setup
-- 📌 **Active Certificate Pinning** - Now properly integrated in networking layer
-- 📄 **Security Documentation** - Comprehensive SECURITY.md with threat model
-- 🚨 **Better Error Messages** - Detailed debugging info for initialization issues
-- 🔄 **Lazy Initialization** - Prevent crashes with pending configuration
-- 🛠️ **Debug Utilities** - New tools for troubleshooting setup issues
 
 ## 🚀 Quick Start
 
@@ -35,7 +26,7 @@ Add LuxAnalytics to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/luxardolabs/LuxAnalytics", from: "2025.6.26.0")
+    .package(url: "https://github.com/luxardolabs/LuxAnalytics", from: "1.0.0")
 ]
 ```
 
@@ -54,7 +45,90 @@ Fatal error: LuxAnalytics.initialize() must be called before accessing shared in
 
 ### Configuration
 
-#### SwiftUI App Lifecycle (Recommended)
+#### Method 1: Info.plist Configuration (Simplest)
+
+Add your DSN to your app's Info.plist:
+
+```xml
+<key>LuxAnalyticsDSN</key>
+<string>https://your-public-id@analytics.example.com/api/v1/events/your-project-id</string>
+```
+
+Optional configuration keys (showing defaults):
+
+```xml
+<!-- Debugging -->
+<key>LuxAnalyticsDebugLogging</key>
+<false/>  <!-- Enable console logging for debugging -->
+
+<!-- Performance Tuning -->
+<key>LuxAnalyticsAutoFlushInterval</key>
+<real>30.0</real>  <!-- Send events every N seconds -->
+
+<key>LuxAnalyticsMaxQueueSize</key>
+<integer>500</integer>  <!-- Force flush when queue reaches this size -->
+
+<key>LuxAnalyticsBatchSize</key>
+<integer>50</integer>  <!-- Maximum events per network request -->
+
+<!-- Network Settings -->
+<key>LuxAnalyticsRequestTimeout</key>
+<real>60.0</real>  <!-- Network request timeout in seconds -->
+
+<key>LuxAnalyticsCompressionEnabled</key>
+<true/>  <!-- Compress payloads with zlib/deflate -->
+```
+
+**Configuration Reference:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `LuxAnalyticsDSN` | String | Required | Your analytics endpoint DSN |
+| `LuxAnalyticsDebugLogging` | Boolean | `false` | Enable debug console output |
+| `LuxAnalyticsAutoFlushInterval` | Number | `30.0` | Seconds between automatic flushes |
+| `LuxAnalyticsMaxQueueSize` | Integer | `500` | Queue size that triggers immediate flush |
+| `LuxAnalyticsBatchSize` | Integer | `50` | Maximum events per API request |
+| `LuxAnalyticsRequestTimeout` | Number | `60.0` | Network timeout in seconds |
+| `LuxAnalyticsCompressionEnabled` | Boolean | `true` | Enable zlib/deflate compression for payloads |
+
+Then initialize in your app:
+
+```swift
+// SwiftUI
+@main
+struct MyApp: App {
+    init() {
+        do {
+            try LuxAnalytics.initializeFromPlist()
+        } catch {
+            print("Failed to initialize analytics: \(error)")
+        }
+    }
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+// UIKit
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication, 
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        do {
+            try LuxAnalytics.initializeFromPlist()
+        } catch {
+            print("Failed to initialize analytics: \(error)")
+        }
+        return true
+    }
+}
+```
+
+#### Method 2: Programmatic Configuration
+
+##### SwiftUI App Lifecycle
 
 ```swift
 import SwiftUI
@@ -74,10 +148,8 @@ struct MyApp: App {
     
     private static func initializeAnalytics() {
         do {
-            let config = LuxAnalyticsConfiguration(
-                apiURL: URL(string: "https://your-analytics-endpoint.com/api/events")!,
-                hmacSecret: getSecretFromKeychain("analytics_hmac_secret"), // Store in Keychain!
-                keyID: getSecretFromKeychain("analytics_key_id"),           // Store in Keychain!
+            let config = try LuxAnalyticsConfiguration(
+                dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
                 debugLogging: true
             )
             
@@ -115,10 +187,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     
     private func initializeAnalytics() {
         do {
-            let config = LuxAnalyticsConfiguration(
-                apiURL: URL(string: "https://your-analytics-endpoint.com/api/events")!,
-                hmacSecret: getSecretFromKeychain("analytics_hmac_secret"),
-                keyID: getSecretFromKeychain("analytics_key_id")
+            let config = try LuxAnalyticsConfiguration(
+                dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id"
             )
             
             try LuxAnalytics.initialize(with: config)
@@ -155,12 +225,7 @@ struct MyApp: App {
 }
 ```
 
-**Important Security Notes:**
-- **NEVER** store HMAC secrets or API keys in Info.plist
-- **NEVER** commit secrets to source control
-- Use iOS Keychain or secure environment injection for sensitive credentials
-- Consider using a backend service to provide temporary tokens
-- Rotate secrets regularly
+**Security Note:** Store production DSN strings securely (e.g., in environment variables or iOS Keychain) rather than committing them to source control.
 
 ### Basic Usage
 
@@ -396,186 +461,35 @@ class AnalyticsMonitor: ObservableObject {
 }
 ```
 
-## 🛡️ Security Best Practices
-
-For comprehensive security documentation, see [SECURITY.md](SECURITY.md).
-
-### Configuration Storage
-
-**❌ NEVER store secrets in:**
-- Info.plist files
-- UserDefaults
-- Bundle resources
-- Git repositories
-- String literals in code
-
-**✅ ALWAYS store secrets in:**
-- iOS Keychain
-- Secure environment injection
-- Backend token service
-- CI/CD secure variables
-
-### Example: Keychain Storage
-
-```swift
-import Security
-
-// Store secret in Keychain
-func storeSecretInKeychain(_ secret: String, for key: String) -> Bool {
-    let data = secret.data(using: .utf8)!
-    
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrAccount as String: key,
-        kSecValueData as String: data,
-        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-    ]
-    
-    // Delete any existing item
-    SecItemDelete(query as CFDictionary)
-    
-    // Add new item
-    let status = SecItemAdd(query as CFDictionary, nil)
-    return status == errSecSuccess
-}
-
-// Retrieve secret from Keychain
-func getSecretFromKeychain(_ key: String) -> String? {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrAccount as String: key,
-        kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitOne
-    ]
-    
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    
-    guard status == errSecSuccess,
-          let data = result as? Data,
-          let secret = String(data: data, encoding: .utf8) else {
-        return nil
-    }
-    
-    return secret
-}
-
-// Example: Environment-based configuration
-struct AnalyticsConfig {
-    static var apiURL: URL {
-        #if DEBUG
-        return URL(string: "https://staging-analytics.example.com/api/events")!
-        #else
-        return URL(string: "https://analytics.example.com/api/events")!
-        #endif
-    }
-    
-    static var hmacSecret: String {
-        // Retrieve from Keychain or secure injection
-        getSecretFromKeychain("analytics_hmac_secret") ?? ""
-    }
-    
-    static var keyID: String {
-        getSecretFromKeychain("analytics_key_id") ?? ""
-    }
-}
-```
-
-### Network Security
+## 🛡️ Security
 
 LuxAnalytics includes built-in security features:
-- HMAC signature on all requests
-- TLS 1.2+ enforcement (iOS minimum)
-- Certificate pinning (active when configured)
-- Request replay protection
-- AES-256-GCM queue encryption
+- DSN-based authentication with Basic Auth
+- TLS encryption for data in transit
+- AES-256-GCM encryption for queued events
+- Automatic PII filtering in logs
+- Optional certificate pinning
 
-Configure certificate pinning:
-```swift
-// Generate SHA256 hash of your certificate:
-// openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
-
-let certificatePinning = CertificatePinningConfig(
-    pinnedCertificateHashes: ["base64-sha256-hash-here"],
-    allowSelfSigned: false,
-    validateChain: true
-)
-
-let config = LuxAnalyticsConfiguration(
-    // ... other config ...
-    certificatePinning: certificatePinning
-)
-```
-
-### HMAC Signature & Compression
-
-LuxAnalytics uses HMAC-SHA256 signatures to ensure data integrity and authenticity. When compression is enabled, the signature is calculated on the **compressed payload**, providing several benefits:
-
-#### How It Works:
-1. **Event Encoding**: Events are encoded to JSON
-2. **Compression** (if enabled): Payload is compressed using zlib (deflate)
-3. **HMAC Signature**: Calculated as `HMAC-SHA256(compressed_payload + timestamp)`
-4. **Headers Sent**:
-   - `X-HMAC-Signature`: The hex-encoded signature
-   - `X-Key-ID`: Your key identifier
-   - `X-Timestamp`: Unix timestamp used in signature
-   - `Content-Encoding`: "deflate" (only if compressed)
-
-#### Server-Side Verification:
-Your server must handle the verification in this specific order:
-
-```swift
-// Example server-side verification (pseudo-code)
-func verifyRequest(body: Data, headers: Headers) -> Bool {
-    // 1. Extract headers
-    let signature = headers["X-HMAC-Signature"]
-    let timestamp = headers["X-Timestamp"]
-    let keyID = headers["X-Key-ID"]
-    let isCompressed = headers["Content-Encoding"] == "deflate"
-    
-    // 2. Verify timestamp is recent (prevent replay attacks)
-    guard isTimestampRecent(timestamp, maxAge: 300) else { return false }
-    
-    // 3. Calculate expected signature on RAW body (compressed if applicable)
-    let message = body + timestamp.data(using: .utf8)!
-    let expectedSignature = HMAC.SHA256(message, key: lookupKey(keyID))
-    
-    // 4. Verify signature BEFORE decompression
-    guard signature == expectedSignature else { return false }
-    
-    // 5. Only decompress after verification succeeds
-    let payload = isCompressed ? decompress(body) : body
-    
-    return true
-}
-```
-
-#### Best Practices:
-- **Security**: Signature on compressed data ensures the compressed payload wasn't tampered with
-- **Performance**: Reduces bandwidth while maintaining security
-- **Compatibility**: Servers must verify compressed data, not decompressed data
-- **Debugging**: Log compression ratio and signature verification failures separately
+For comprehensive security documentation and best practices, see [SECURITY.md](SECURITY.md).
 
 ## 🔧 Advanced Configuration
 
 ### Full Configuration Options
 
 ```swift
-let config = LuxAnalyticsConfiguration(
-    // Required parameters
-    apiURL: URL(string: "https://api.example.com")!,
-    hmacSecret: "your-secret",
-    keyID: "your-key-id",
+let config = try LuxAnalyticsConfiguration(
+    // Required parameter
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
     
     // Network & Performance
-    autoFlushInterval: 60.0,        // Seconds between auto-flushes (default: 60)
-    maxQueueSize: 100,              // Events before forcing flush (default: 100)
+    autoFlushInterval: 30.0,        // Seconds between auto-flushes (default: 30)
+    maxQueueSize: 500,              // Events before forcing flush (default: 500)
     batchSize: 50,                  // Events per batch (default: 50)
-    requestTimeout: 30.0,           // Network timeout in seconds (default: 30)
-    maxRetryAttempts: 3,            // Retry attempts for failed requests (default: 3)
+    requestTimeout: 60.0,           // Network timeout in seconds (default: 60)
+    maxRetryAttempts: 5,            // Retry attempts for failed requests (default: 5)
     
     // Queue Management  
-    maxQueueSizeHard: 1000,         // Hard limit before dropping events (default: 1000)
+    maxQueueSizeHard: 10000,        // Hard limit before dropping events (default: 10000)
     eventTTL: 604800,               // Event time-to-live: 7 days (default: 604800)
     overflowStrategy: .dropOldest,  // What to do when queue is full (default: .dropOldest)
     
@@ -628,8 +542,8 @@ func application(_ application: UIApplication,
 ### Enable Debug Logging
 
 ```swift
-let config = LuxAnalyticsConfiguration(
-    // ... other config ...
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
     debugLogging: true
 )
 
@@ -690,9 +604,7 @@ LuxAnalytics.lazyShared.track("event")  // Auto-initializes
 2. **Use Quick Start:**
 ```swift
 try LuxAnalytics.quickStart(
-    apiURL: URL(string: "https://api.example.com")!,
-    hmacSecret: getFromKeychain("secret"),
-    keyID: getFromKeychain("key")
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id"
 )
 ```
 
@@ -732,8 +644,8 @@ await LuxAnalytics.flushAsync()
 
 ```swift
 // More aggressive configuration for memory-constrained apps
-let config = LuxAnalyticsConfiguration(
-    // ... required params ...
+let config = try LuxAnalyticsConfiguration(
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
     maxQueueSize: 50,           // Flush more frequently
     maxQueueSizeHard: 200,      // Lower hard limit
     eventTTL: 86400,            // 1 day instead of 7
