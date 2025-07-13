@@ -1,148 +1,168 @@
-# LuxAnalytics iOS 18 Usage Example
+# Quick Examples
 
-This SDK requires iOS 18+ and Swift 6. **Zero compilation warnings** with full Swift 6 strict concurrency compliance.
+Common usage patterns for LuxAnalytics. For comprehensive documentation, see the [Wiki](wiki/).
 
 ## Basic Setup
 
 ```swift
 import LuxAnalytics
 
-// Initialize at app startup
-let config = try LuxAnalyticsConfiguration(
-    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id"
-)
-
-try await LuxAnalytics.initialize(with: config)
-
-// Or use quick start
-try await LuxAnalytics.quickStart(
-    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id",
-    debugLogging: true
-)
-```
-
-## Tracking Events
-
-```swift
-// Get shared instance (async)
-let analytics = await LuxAnalytics.shared
-
-// Simple event tracking with async/await
-try await analytics.track("user_login")
-
-// With metadata
-try await analytics.track("purchase_completed", metadata: [
-    "product_id": "12345",
-    "amount": "99.99",
-    "currency": "USD"
-])
-
-// PII is automatically filtered in all events
-try await analytics.track("contact_form", metadata: [
-    "email": "user@example.com",  // Will be redacted
-    "phone": "555-1234",          // Will be redacted
-    "message": "Hello world"
-])
-```
-
-## Monitoring Events
-
-```swift
-// Monitor analytics events using AsyncStream
-Task {
-    for await event in LuxAnalyticsEvents.eventStream {
-        switch event {
-        case .eventQueued(let event):
-            print("Event queued: \(event.name)")
-            
-        case .eventsSent(let events):
-            print("Successfully sent \(events.count) events")
-            
-        case .eventsFailed(let events, let error):
-            print("Failed to send \(events.count) events: \(error)")
-            
-        case .eventsDropped(let count, let reason):
-            print("Dropped \(count) events due to: \(reason)")
-            
-        case .eventsExpired(let events):
-            print("Expired \(events.count) events")
-        }
-    }
-}
-```
-
-## User & Session Management
-
-```swift
-// Get shared instance
-let analytics = await LuxAnalytics.shared
-
-// Set user ID (async)
-await analytics.setUser("user-12345")
-
-// Set session ID (async)
-await analytics.setSession("session-abc")
-```
-
-## Manual Flush
-
-```swift
-// Events are automatically batched and sent
-// Force flush when needed (e.g., app backgrounding)
-await LuxAnalytics.flush()
-```
-
-## Background Processing
-
-```swift
-// Background processing is automatically enabled
-// Just initialize the SDK and it handles app lifecycle events
 @main
 struct MyApp: App {
     init() {
         Task {
-            try? await LuxAnalytics.quickStart(dsn: "your-dsn")
+            try await LuxAnalytics.quickStart(
+                dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id"
+            )
         }
     }
     
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+        WindowGroup { ContentView() }
     }
 }
 ```
 
-## Configuration Options
+## Event Tracking
 
 ```swift
-let config = try LuxAnalyticsConfiguration(
-    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id",
-    batchSize: 100,                    // Events per batch
-    autoFlushInterval: 30,             // Seconds
-    maxQueueSize: 1000,                // Maximum queued events
-    maxQueueSizeHard: 2000,            // Hard limit before dropping
-    eventTTL: 86400,                   // Event expiry (24 hours)
-    maxRetryAttempts: 3,
-    requestTimeout: 30,
-    compressionEnabled: true,
-    compressionThreshold: 1024,        // Bytes
-    overflowStrategy: .dropOldest
-)
+// Basic event tracking
+let analytics = await LuxAnalytics.shared
+try await analytics.track("user_signup")
+
+// Event with metadata
+try await analytics.track("purchase_completed", metadata: [
+    "product_id": "abc123",
+    "amount": "49.99",
+    "currency": "USD"
+])
+
+// User identification
+await analytics.setUser("user-123")
+await analytics.setSession("session-456")
+```
+
+## SwiftUI Integration
+
+```swift
+struct ContentView: View {
+    var body: some View {
+        NavigationView {
+            VStack {
+                Button("Track Event") {
+                    Task {
+                        let analytics = await LuxAnalytics.shared
+                        try await analytics.track("button_tapped")
+                    }
+                }
+            }
+        }
+        .task {
+            let analytics = await LuxAnalytics.shared
+            try await analytics.track("screen_viewed", metadata: [
+                "screen_name": "content_view"
+            ])
+        }
+    }
+}
 ```
 
 ## Error Handling
 
 ```swift
-do {
-    let analytics = await LuxAnalytics.shared
-    try await analytics.track("event_name")
-} catch LuxAnalyticsError.analyticsDisabled {
-    // Analytics is disabled
-} catch LuxAnalyticsError.notInitialized {
-    // SDK not initialized
-} catch {
-    // Other errors
+func trackEvent(_ name: String) async {
+    do {
+        let analytics = await LuxAnalytics.shared
+        try await analytics.track(name)
+    } catch LuxAnalyticsError.notInitialized {
+        print("SDK not initialized")
+    } catch LuxAnalyticsError.queueFull {
+        print("Event queue is full")
+    } catch {
+        print("Tracking failed: \(error)")
+    }
+}
+```
+
+## App-Specific Analytics Layer
+
+```swift
+extension LuxAnalytics {
+    static func trackScreen(_ name: String) async {
+        guard UserDefaults.standard.bool(forKey: "analytics_enabled") else { return }
+        
+        let analytics = await LuxAnalytics.shared
+        try? await analytics.track("screen_view", metadata: [
+            "screen_name": name
+        ])
+    }
+    
+    static func trackPurchase(amount: Double, currency: String = "USD") async {
+        let analytics = await LuxAnalytics.shared
+        
+        // Privacy-conscious amount ranges
+        let range = switch amount {
+            case ..<10: "$0-10"
+            case 10..<50: "$10-50"
+            case 50..<100: "$50-100"
+            default: "$100+"
+        }
+        
+        try? await analytics.track("purchase", metadata: [
+            "amount_range": range,
+            "currency": currency
+        ])
+    }
+}
+
+// Usage
+await LuxAnalytics.trackScreen("home")
+await LuxAnalytics.trackPurchase(amount: 49.99)
+```
+
+## Configuration Examples
+
+### Info.plist Configuration
+
+```xml
+<key>LuxAnalyticsDSN</key>
+<string>https://your-public-id@analytics.example.com/api/v1/events/your-project-id</string>
+
+<key>LuxAnalyticsDebugLogging</key>
+<true/>
+
+<key>LuxAnalyticsAutoFlushInterval</key>
+<real>30.0</real>
+```
+
+### Programmatic Configuration
+
+```swift
+let config = try LuxAnalyticsConfiguration(
+    dsn: "your-dsn",
+    autoFlushInterval: 30.0,
+    maxQueueSize: 500,
+    batchSize: 50,
+    debugLogging: true
+)
+
+try await LuxAnalytics.initialize(with: config)
+```
+
+## Real-time Monitoring
+
+```swift
+Task {
+    for await notification in LuxAnalyticsEvents.eventStream {
+        switch notification {
+        case .eventQueued(let event):
+            print("📤 Event queued: \(event.name)")
+        case .eventsSent(let events):
+            print("✅ Sent \(events.count) events")
+        case .eventsFailed(let events, let error):
+            print("❌ Failed: \(error)")
+        }
+    }
 }
 ```
 
@@ -151,33 +171,24 @@ do {
 ```swift
 // Get queue statistics
 let stats = await LuxAnalytics.getQueueStats()
-print("Total events in queue: \(stats.totalEvents)")
-print("Total size bytes: \(stats.totalSizeBytes)")
-print("Failed batch count: \(stats.failedBatchCount)")
+print("Events in queue: \(stats.totalEvents)")
 
-// Check health
+// Manual flush
+await LuxAnalytics.flush()
+
+// Health check
 let isHealthy = await LuxAnalytics.healthCheck()
-
-// Clear queue (use with caution)
-await LuxAnalytics.clearQueue()
+print("SDK healthy: \(isHealthy)")
 ```
 
-## Diagnostics
+---
 
-```swift
-// Get diagnostic metrics
-let metrics = await LuxAnalytics.getDiagnostics()
-print("Events sent: \(metrics.networkStats.totalEventsSent)")
-print("Events failed: \(metrics.networkStats.totalEventsFailed)")
-print("Average flush duration: \(metrics.performanceStats.averageFlushDuration)s")
-print("Circuit breaker state: \(metrics.circuitBreakerStatus?.state ?? "unknown")")
-```
+## 📚 More Examples
 
-## Best Practices
+For comprehensive guides and advanced patterns, see:
 
-1. **Initialize early**: Set up LuxAnalytics in your app delegate or early in app lifecycle
-2. **Use structured metadata**: Keep metadata keys consistent across events
-3. **Handle errors**: Always handle potential errors when tracking events
-4. **Monitor queue size**: Use queue stats to ensure events aren't piling up
-5. **Background processing is automatic**: The SDK handles app lifecycle events automatically
-6. **PII filtering is automatic**: All events are automatically sanitized
+- [📖 **Complete Wiki**](wiki/) - Detailed documentation and tutorials
+- [🔧 **Configuration Guide**](wiki/Configuration.md) - All configuration options
+- [🚀 **API Reference**](wiki/API-Reference.md) - Complete API documentation
+- [💡 **Best Practices**](wiki/Best-Practices.md) - Recommended patterns
+- [🐛 **Troubleshooting**](wiki/Troubleshooting.md) - Common issues and solutions
