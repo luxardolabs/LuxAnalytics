@@ -1,12 +1,17 @@
 import Foundation
+#if canImport(Network)
 import Network
+#endif
 
 /// Monitors network connectivity status
 actor NetworkMonitor {
     static let shared = NetworkMonitor()
     
+    #if canImport(Network)
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.luxardolabs.LuxAnalytics.networkmonitor")
+    #endif
+    
     private var _isConnected = true
     private var _isExpensive = false
     
@@ -19,11 +24,14 @@ actor NetworkMonitor {
     }
     
     private init() {
+        #if canImport(Network)
         Task {
             await startMonitoring()
         }
+        #endif
     }
     
+    #if canImport(Network)
     private func startMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
             Task {
@@ -37,6 +45,7 @@ actor NetworkMonitor {
         _isConnected = path.status == .satisfied
         _isExpensive = path.isExpensive
     }
+    #endif
     
     func waitForConnectivity() async {
         guard !_isConnected else { return }

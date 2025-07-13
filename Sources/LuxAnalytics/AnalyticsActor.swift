@@ -10,6 +10,7 @@ actor AnalyticsActor {
     private var currentUserId: String?
     private var currentSessionId: String?
     private var flushTask: Task<Void, Never>?
+    private var notificationObservers: [NSObjectProtocol] = []
     
     init(configuration: LuxAnalyticsConfiguration) {
         self.configuration = configuration
@@ -37,52 +38,55 @@ actor AnalyticsActor {
         flushTask?.cancel()
         flushTask = Task {
             for await _ in AsyncTimer.schedule(every: .seconds(configuration.autoFlushInterval)) {
-                await LuxAnalytics.flushAsync()
+                await LuxAnalytics.flush()
             }
         }
     }
     
     func setupAppLifecycleObservers() {
+        #if canImport(UIKit)
         Task { @MainActor in
-            NotificationCenter.default.addObserver(
+            let backgroundObserver = NotificationCenter.default.addObserver(
                 forName: UIApplication.didEnterBackgroundNotification,
                 object: nil,
                 queue: .main
-            ) { _ in
-                Task {
-                    await LuxAnalytics.flushAsync()
+            ) { [weak self] _ in
+                Task { [weak self] in
+                    await self?.handleAppBackground()
                 }
             }
+            notificationObservers.append(backgroundObserver)
             
-            NotificationCenter.default.addObserver(
+            let terminateObserver = NotificationCenter.default.addObserver(
                 forName: UIApplication.willTerminateNotification,
                 object: nil,
                 queue: .main
             ) { _ in
                 Task {
-                    await LuxAnalytics.flushAsync()
+                    await LuxAnalytics.flush()
                 }
             }
+            notificationObservers.append(terminateObserver)
             
             // Memory warning handling
-            NotificationCenter.default.addObserver(
+            let memoryObserver = NotificationCenter.default.addObserver(
                 forName: UIApplication.didReceiveMemoryWarningNotification,
                 object: nil,
                 queue: .main
-            ) { _ in
-                Task {
-                    await self.handleMemoryWarning()
+            ) { [weak self] _ in
+                Task { [weak self] in
+                    await self?.handleMemoryWarning()
                 }
             }
+            notificationObservers.append(memoryObserver)
         }
+        #endif
     }
     
     func cleanup() {
         flushTask?.cancel()
         flushTask = nil
-        Task { @MainActor in
-            NotificationCenter.default.removeObserver(self)
-        }
+        removeLifecycleObservers()
     }
     
     func debugLog(_ message: String) {
@@ -108,8 +112,41 @@ actor AnalyticsActor {
     }
     
     private func removeLifecycleObservers() {
+        #if canImport(UIKit)
         Task { @MainActor in
-            NotificationCenter.default.removeObserver(self)
+            notificationObservers.forEach { observer in
+                NotificationCenter.default.removeObserver(observer)
+            }
+            notificationObservers.removeAll()
         }
+        #endif
+    }
+    
+    private func handleAppBackground() async {
+        debugLog("App entering background - triggering flush")
+        
+        #if canImport(UIKit)
+        // Request background task
+        await BackgroundTaskManager.shared.runBackgroundTask { [weak self] in
+            guard let self = self else { return }
+            
+            // Flush events
+            await LuxAnalytics.flushAsync()
+            await self.debugLog("Background flush completed")
+        }
+        #else
+        // On non-iOS platforms, just flush immediately
+        await LuxAnalytics.flushAsync()
+        #endif
+    }
+    
+    deinit {
+        // Ensure cleanup happens
+        #if canImport(UIKit)
+        notificationObservers.forEach { observer in
+            NotificationCenter.default.removeObserver(observer)
+        }
+        #endif
+        SecureLogger.log("AnalyticsActor deinit", category: .general, level: .debug)
     }
 }

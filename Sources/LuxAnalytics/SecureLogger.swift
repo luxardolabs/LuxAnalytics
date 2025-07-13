@@ -1,23 +1,48 @@
 import Foundation
 import os.log
 
-/// Secure logging that automatically redacts sensitive information
-public enum SecureLogger {
+/// Secure logger that automatically redacts sensitive information
+public struct SecureLogger {
     
-    /// Log subsystem for LuxAnalytics
-    private static let subsystem = "com.luxardolabs.LuxAnalytics"
+    // Cached debug logging flag to avoid async access
+    private static var _debugLoggingEnabled = false
+    private static let debugLoggingLock = NSLock()
+    
+    /// Update the cached debug logging flag
+    public static func updateDebugLogging(_ enabled: Bool) {
+        debugLoggingLock.lock()
+        defer { debugLoggingLock.unlock() }
+        _debugLoggingEnabled = enabled
+    }
+    
+    /// Check if debug logging is enabled
+    private static var debugLoggingEnabled: Bool {
+        debugLoggingLock.lock()
+        defer { debugLoggingLock.unlock() }
+        return _debugLoggingEnabled
+    }
     
     /// Log categories
-    public enum Category: String {
-        case general = "General"
-        case network = "Network"
-        case queue = "Queue"
-        case configuration = "Configuration"
-        case error = "Error"
-        case performance = "Performance"
+    public enum Category {
+        case general
+        case network
+        case queue
+        case error
+        case security
         
         var osLog: OSLog {
-            return OSLog(subsystem: SecureLogger.subsystem, category: self.rawValue)
+            switch self {
+            case .general:
+                return OSLog(subsystem: "com.luxardolabs.LuxAnalytics", category: "General")
+            case .network:
+                return OSLog(subsystem: "com.luxardolabs.LuxAnalytics", category: "Network")
+            case .queue:
+                return OSLog(subsystem: "com.luxardolabs.LuxAnalytics", category: "Queue")
+            case .error:
+                return OSLog(subsystem: "com.luxardolabs.LuxAnalytics", category: "Error")
+            case .security:
+                return OSLog(subsystem: "com.luxardolabs.LuxAnalytics", category: "Security")
+            }
         }
     }
     
@@ -25,58 +50,46 @@ public enum SecureLogger {
     public enum Level {
         case debug
         case info
+        case warning
         case error
-        case fault
         
         var osLogType: OSLogType {
             switch self {
-            case .debug: return .debug
-            case .info: return .info
-            case .error: return .error
-            case .fault: return .fault
+            case .debug:
+                return .debug
+            case .info:
+                return .info
+            case .warning:
+                return .default
+            case .error:
+                return .error
             }
         }
     }
     
-    /// Redact sensitive information from a string
-    static func redact(_ string: String) -> String {
-        var redacted = string
+    /// Patterns to redact
+    private static let redactionPatterns: [(pattern: String, replacement: String)] = [
+        // Email addresses
+        (#"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"#, "<email>"),
         
-        // Use PII filter to sanitize
-        redacted = PIIFilter.sanitize(redacted)
+        // IP addresses
+        (#"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"#, "<ip>"),
         
-        // Additional patterns specific to our SDK
+        // UUIDs
+        (#"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#, "<uuid>"),
         
-        // Redact HMAC secrets (any hex string > 32 chars)
-        redacted = redacted.replacingOccurrences(
-            of: #"\b[a-fA-F0-9]{32,}\b"#,
-            with: "[HMAC_SECRET]",
-            options: .regularExpression
-        )
+        // API keys (common patterns)
+        (#"(?i)(api[_-]?key|apikey|secret|token|auth|password|pwd)[\"']?\s*[:=]\s*[\"']?[^\s\"']*"#, "$1=<redacted>"),
         
-        // Redact API keys
-        redacted = redacted.replacingOccurrences(
-            of: #"\b(api[_-]?key|key[_-]?id)\s*[:=]\s*[\"']?([^\"'\s]+)[\"']?"#,
-            with: "$1=[REDACTED]",
-            options: [.regularExpression, .caseInsensitive]
-        )
+        // Credit card numbers
+        (#"\b(?:\d[ -]*?){13,19}\b"#, "<card>"),
         
-        // Redact URLs with credentials
-        redacted = redacted.replacingOccurrences(
-            of: #"(https?://)([^:]+):([^@]+)@"#,
-            with: "$1[REDACTED]:[REDACTED]@",
-            options: .regularExpression
-        )
+        // Phone numbers
+        (#"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"#, "<phone>"),
         
-        // Redact user IDs (UUIDs)
-        redacted = redacted.replacingOccurrences(
-            of: #"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"#,
-            with: "[UUID]",
-            options: .regularExpression
-        )
-        
-        return redacted
-    }
+        // Social Security Numbers
+        (#"\b\d{3}-\d{2}-\d{4}\b"#, "<ssn>")
+    ]
     
     /// Log a message with automatic redaction
     public static func log(
@@ -90,7 +103,7 @@ public enum SecureLogger {
         let redactedMessage = redact(message)
         let fileName = URL(fileURLWithPath: file).lastPathComponent
         
-        if LuxAnalyticsConfiguration.current?.debugLogging == true {
+        if debugLoggingEnabled {
             os_log(
                 "%{public}@ [%{public}@:%{public}d] %{public}@",
                 log: category.osLog,
@@ -100,36 +113,33 @@ public enum SecureLogger {
                 line,
                 redactedMessage
             )
-        } else if level == .error || level == .fault {
-            // Always log errors, even if debug logging is off
-            os_log(
-                "%{public}@",
-                log: category.osLog,
-                type: level.osLogType,
-                redactedMessage
-            )
         }
     }
     
-    /// Log with formatting
-    public static func log(
-        _ format: String,
-        _ args: CVarArg...,
-        category: Category = .general,
-        level: Level = .debug,
-        file: String = #file,
-        function: String = #function,
-        line: Int = #line
-    ) {
-        let message = String(format: format, arguments: args)
-        log(message, category: category, level: level, file: file, function: function, line: line)
+    /// Redact sensitive information from a string
+    public static func redact(_ string: String) -> String {
+        var result = string
+        
+        for (pattern, replacement) in redactionPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                result = regex.stringByReplacingMatches(
+                    in: result,
+                    options: [],
+                    range: NSRange(result.startIndex..., in: result),
+                    withTemplate: replacement
+                )
+            }
+        }
+        
+        return result
     }
 }
 
-// MARK: - Actor Logging Extension
+// MARK: - PIIFilter Integration
 
-extension AnalyticsActor {
-    func log(_ message: String, category: SecureLogger.Category = .general, level: SecureLogger.Level = .debug) {
-        SecureLogger.log(message, category: category, level: level)
+extension PIIFilter {
+    /// Filter a dictionary using SecureLogger's redaction
+    public static func filter(_ dictionary: [String: String]) -> [String: String] {
+        return dictionary.mapValues { SecureLogger.redact($0) }
     }
 }

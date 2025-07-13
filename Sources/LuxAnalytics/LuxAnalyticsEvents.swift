@@ -63,6 +63,33 @@ final class EventObserver: Sendable {
     }
 }
 
+/// Extension for internal notifications from LuxAnalytics
+extension LuxAnalyticsEvents {
+    internal static let shared = LuxAnalyticsEvents()
+    
+    func notifyQueued(_ event: AnalyticsEvent) async {
+        await EventManager.shared.notify(.eventQueued(event))
+    }
+    
+    func notifySent(_ event: AnalyticsEvent) async {
+        await EventManager.shared.notify(.eventsSent([event]))
+    }
+    
+    func notifyFailed(_ event: AnalyticsEvent, error: Error) async {
+        let luxError = error as? LuxAnalyticsError ?? .networkError(error)
+        await EventManager.shared.notify(.eventsFailed([event], error: luxError))
+    }
+    
+    func notifyDropped(_ event: AnalyticsEvent, reason: String) async {
+        // Convert reason to overflow strategy (default to dropOldest)
+        await EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
+    }
+    
+    func notifyExpired(_ event: AnalyticsEvent) async {
+        await EventManager.shared.notify(.eventsExpired([event]))
+    }
+}
+
 /// Public API for event notifications
 extension LuxAnalytics {
     

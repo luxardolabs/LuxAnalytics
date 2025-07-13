@@ -1,72 +1,132 @@
 import Foundation
 
-/// Debug utilities for troubleshooting initialization issues
+/// Debug utilities for LuxAnalytics troubleshooting
 public struct LuxAnalyticsDebug {
     
-    /// Enable initialization debugging
-    private static let debugLock = NSLock()
-    nonisolated(unsafe) private static var _debugInitialization = false
-    
-    public static var debugInitialization: Bool {
-        get {
-            debugLock.lock()
-            defer { debugLock.unlock() }
-            return _debugInitialization
-        }
-        set {
-            debugLock.lock()
-            defer { debugLock.unlock() }
-            _debugInitialization = newValue
-        }
-    }
-    
-    /// Track initialization attempts
-    internal static func logInitAttempt(from: String = #function, file: String = #file, line: Int = #line) {
-        guard debugInitialization else { return }
+    /// Check current status of LuxAnalytics
+    public static func status() async {
         print("""
-            [LuxAnalytics Debug] Initialization attempt:
-            - From: \(from)
-            - File: \(file):\(line)
-            - Thread: \(Thread.isMainThread ? "Main" : "Background")
-            - Time: \(Date())
+            
+            ========== LuxAnalytics Status ==========
+            
+            🔹 Initialization:
+               Initialized: \(await LuxAnalytics.isInitialized)
+            
+            🔹 Queue Stats:
+               \(await queueDescription())
+            
+            🔹 Network:
+               Available: \(await NetworkMonitor.shared.isConnected)
+               Is Expensive: \(await NetworkMonitor.shared.isExpensive)
+            
+            🔹 Analytics Enabled:
+               \(await AnalyticsSettings.shared.isEnabled)
+            
+            =========================================
+            
             """)
     }
     
-    /// Track shared access attempts
-    internal static func logSharedAccess(from: String = #function, file: String = #file, line: Int = #line) {
-        guard debugInitialization else { return }
-        print("""
-            [LuxAnalytics Debug] Shared instance accessed:
-            - From: \(from)
-            - File: \(file):\(line)
-            - Initialized: \(LuxAnalytics.isInitialized)
-            - Thread: \(Thread.isMainThread ? "Main" : "Background")
-            """)
+    private static func queueDescription() async -> String {
+        guard await LuxAnalytics.isInitialized else {
+            return "Not initialized"
+        }
+        
+        let stats = await LuxAnalytics.getQueueStats()
+        return """
+               Total Events: \(stats.totalEvents)
+               Oldest Event: \(stats.oldestEventAge.map { "\($0)s ago" } ?? "None")
+               Total Size: \(ByteCountFormatter.string(fromByteCount: Int64(stats.totalSizeBytes), countStyle: .file))
+               """
     }
     
     /// Validate common setup issues
-    public static func validateSetup() {
+    public static func validateSetup() async {
         print("""
             
             ========== LuxAnalytics Setup Validation ==========
             ✓ Checking initialization status...
-              - Initialized: \(LuxAnalytics.isInitialized)
+              - Initialized: \(await LuxAnalytics.isInitialized)
             
             ✓ Checking configuration...
-              - Has current config: \(LuxAnalyticsConfiguration.current != nil)
+              - Has current config: \(await LuxAnalyticsStorage.shared.getConfiguration() != nil)
             
             ✓ Checking queue status...
-              - Queue accessible: \(LuxAnalytics.sharedIfInitialized != nil)
+              - Queue accessible: \(await LuxAnalytics.sharedIfInitialized != nil)
             
             ✓ Common issues to check:
               1. Is LuxAnalytics.initialize() called in App.init()?
               2. Is the initialization method static?
               3. Are StateObjects created AFTER initialization?
-              4. Do any static properties use LuxAnalytics?
+              4. Check console for any error messages
             
-            For more help: https://github.com/luxardolabs/LuxAnalytics#troubleshooting
+            ✓ Next steps:
+              - Enable debug logging in configuration
+              - Check network connectivity
+              - Verify DSN format is correct
             ===================================================
             
             """)
+    }
+    
+    /// Print sample initialization code
+    public static func printSampleCode() {
+        print("""
+            
+            ========== Sample LuxAnalytics Setup ==========
+            
+            // In your App struct:
+            
+            @main
+            struct MyApp: App {
+                init() {
+                    // Option 1: From Info.plist
+                    Task {
+                        try? await LuxAnalytics.initializeFromPlist()
+                    }
+                    
+                    // Option 2: Direct configuration
+                    Task {
+                        let config = try? LuxAnalyticsConfiguration(
+                            dsn: "https://your-id@analytics.example.com/api/v1/events/project-id"
+                        )
+                        if let config = config {
+                            try? await LuxAnalytics.initialize(with: config)
+                        }
+                    }
+                }
+                
+                var body: some Scene {
+                    WindowGroup {
+                        ContentView()
+                    }
+                }
+            }
+            
+            // In your views:
+            
+            Task {
+                try? await LuxAnalytics.shared.track("button_tapped")
+            }
+            
+            ==============================================
+            
+            """)
+    }
+}
+
+// MARK: - Development Helpers
+
+extension LuxAnalytics {
+    
+    /// Force a flush (for testing)
+    public static func forceFlush() async {
+        await flush()
+    }
+    
+    /// Get current metrics
+    public static func getMetrics() async -> LuxAnalyticsMetrics? {
+        guard await isInitialized else { return nil }
+        return await LuxAnalyticsDiagnostics.shared.getMetrics()
     }
 }

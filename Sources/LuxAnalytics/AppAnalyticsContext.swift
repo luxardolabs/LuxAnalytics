@@ -33,6 +33,7 @@ public actor AppAnalyticsContext {
     private func generateContext() async -> [String: String] {
         let deviceId = await getOrCreateDeviceID()
         
+        #if canImport(UIKit)
         return await MainActor.run {
             let size = UIScreen.main.bounds
             return [
@@ -48,6 +49,21 @@ public actor AppAnalyticsContext {
                 "is_testflight": Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" ? "true" : "false"
             ]
         }
+        #else
+        // Non-iOS platforms
+        return [
+            "device_model": "Unknown",
+            "device_type": "Unknown",
+            "screen_resolution": "Unknown",
+            "system_version": "Unknown",
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            "build_number": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+            "locale": Locale.current.identifier,
+            "timezone": TimeZone.current.identifier,
+            "device_id": deviceId,
+            "is_testflight": "false"
+        ]
+        #endif
     }
 
     private func getOrCreateDeviceID() async -> String {
@@ -55,6 +71,7 @@ public actor AppAnalyticsContext {
             return cached
         }
         
+        #if canImport(UIKit)
         let uuid = await MainActor.run { UIDevice.current.identifierForVendor?.uuidString }
         guard let uuid = uuid else { 
             let fallback = "unknown"
@@ -66,9 +83,18 @@ public actor AppAnalyticsContext {
         let id = hash.map { String(format: "%02x", $0) }.joined()
         deviceID = id
         return id
+        #else
+        // Non-iOS platforms - generate a random UUID
+        let uuid = UUID().uuidString
+        let hash = SHA256.hash(data: Data(uuid.utf8))
+        let id = hash.map { String(format: "%02x", $0) }.joined()
+        deviceID = id
+        return id
+        #endif
     }
 }
 
+#if canImport(UIKit)
 extension UIDevice {
     /// Get device model code
     /// This is safe to call from any thread as it doesn't access UIKit
@@ -82,3 +108,4 @@ extension UIDevice {
         }
     }
 }
+#endif
