@@ -1,7 +1,7 @@
 import Foundation
 
 /// Statistics about the event queue
-public struct QueueStats: Sendable {
+public struct QueueStats: Sendable, Codable {
     public let totalEvents: Int
     public let totalSizeBytes: Int
     public let oldestEventAge: TimeInterval?
@@ -75,7 +75,7 @@ public actor LuxAnalyticsQueue {
             if !expiredEvents.isEmpty {
                 Task {
                     for event in expiredEvents {
-                        await LuxAnalytics.notifyEventExpired(event)
+                        await LuxAnalyticsEvents.notifyEventExpired(event)
                     }
                 }
             }
@@ -93,7 +93,7 @@ public actor LuxAnalyticsQueue {
                 queueCache.removeFirst(toRemove)
                 Task {
                     for event in droppedEvents {
-                        await LuxAnalytics.notifyEventDropped(event, reason: "Queue overflow - oldest dropped")
+                        await LuxAnalyticsEvents.notifyEventDropped(event, reason: "Queue overflow - oldest dropped")
                     }
                 }
             }
@@ -107,7 +107,7 @@ public actor LuxAnalyticsQueue {
             queueCache.removeAll()
             Task {
                 for event in droppedEvents {
-                    await LuxAnalytics.notifyEventDropped(event, reason: "Queue overflow - all dropped")
+                    await LuxAnalyticsEvents.notifyEventDropped(event, reason: "Queue overflow - all dropped")
                 }
             }
         }
@@ -158,10 +158,10 @@ public actor LuxAnalyticsQueue {
         let oldestEventAge = oldestEvent.map { now.timeIntervalSince($0.queuedAt) }
         let newestEventAge = newestEvent.map { now.timeIntervalSince($0.queuedAt) }
         
-        let activeEvents = queueCache.filter { queuedEvent in
+        _ = queueCache.filter { queuedEvent in
             queuedEvent.retryCount < LuxAnalyticsDefaults.maxRetryAttempts
         }
-        let expiredEvents = queueCache.filter { queuedEvent in
+        _ = queueCache.filter { queuedEvent in
             queuedEvent.isExpired(ttlSeconds: LuxAnalyticsDefaults.eventTTL)
         }
         
