@@ -1,12 +1,13 @@
 # LuxAnalytics
 
-A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with Swift 6 and modern concurrency. LuxAnalytics provides secure, reliable event tracking with automatic batching, offline support, and enterprise-grade features.
+A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with Swift 6 and modern concurrency. LuxAnalytics provides secure, reliable event tracking with automatic batching, offline support, and enterprise-grade features. **Zero compilation warnings** with full iOS 18 and Swift 6 strict concurrency compliance.
 
 ## ✨ Key Features
 
 - 🔒 **Privacy-First** - Automatic PII filtering, encrypted queue storage
 - ⚡ **100% Async/Await** - Modern Swift concurrency throughout
-- 🎯 **Swift 6 Compliant** - Full actor isolation and data race safety
+- 🎯 **Swift 6 Compliant** - Full actor isolation and data race safety with zero warnings
+- ✨ **Perfect Build Quality** - Zero compilation warnings on iOS 18.5 + Swift 6
 - 📦 **Smart Batching** - Automatic event batching with configurable sizes
 - 🔐 **DSN Authentication** - Simple configuration with Basic Auth
 - 🚀 **Lifecycle Aware** - Automatic flush on background/terminate

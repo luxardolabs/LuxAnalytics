@@ -1,6 +1,6 @@
 # LuxAnalytics iOS 18 Usage Example
 
-This SDK requires iOS 18+ and Swift 6.
+This SDK requires iOS 18+ and Swift 6. **Zero compilation warnings** with full Swift 6 strict concurrency compliance.
 
 ## Basic Setup
 
@@ -12,24 +12,33 @@ let config = try LuxAnalyticsConfiguration(
     dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id"
 )
 
-try LuxAnalytics.initialize(with: config)
+try await LuxAnalytics.initialize(with: config)
+
+// Or use quick start
+try await LuxAnalytics.quickStart(
+    dsn: "https://your-key-id@analytics.example.com/api/v1/events/your-project-id",
+    debugLogging: true
+)
 ```
 
 ## Tracking Events
 
 ```swift
+// Get shared instance (async)
+let analytics = await LuxAnalytics.shared
+
 // Simple event tracking with async/await
-try await LuxAnalytics.shared.track("user_login")
+try await analytics.track("user_login")
 
 // With metadata
-try await LuxAnalytics.shared.track("purchase_completed", metadata: [
+try await analytics.track("purchase_completed", metadata: [
     "product_id": "12345",
     "amount": "99.99",
     "currency": "USD"
 ])
 
-// With PII filtering
-try await LuxAnalytics.shared.trackSanitized("contact_form", metadata: [
+// PII is automatically filtered in all events
+try await analytics.track("contact_form", metadata: [
     "email": "user@example.com",  // Will be redacted
     "phone": "555-1234",          // Will be redacted
     "message": "Hello world"
@@ -65,11 +74,14 @@ Task {
 ## User & Session Management
 
 ```swift
-// Set user ID (synchronous, no await needed)
-LuxAnalytics.shared.setUser("user-12345")
+// Get shared instance
+let analytics = await LuxAnalytics.shared
 
-// Set session ID (synchronous, no await needed)
-LuxAnalytics.shared.setSession("session-abc")
+// Set user ID (async)
+await analytics.setUser("user-12345")
+
+// Set session ID (async)
+await analytics.setSession("session-abc")
 ```
 
 ## Manual Flush
@@ -77,17 +89,27 @@ LuxAnalytics.shared.setSession("session-abc")
 ```swift
 // Events are automatically batched and sent
 // Force flush when needed (e.g., app backgrounding)
-await LuxAnalytics.flushAsync()
+await LuxAnalytics.flush()
 ```
 
 ## Background Processing
 
 ```swift
-// Enable background task processing in AppDelegate
-@MainActor
-func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    LuxAnalytics.enableBackgroundProcessing()
-    return true
+// Background processing is automatically enabled
+// Just initialize the SDK and it handles app lifecycle events
+@main
+struct MyApp: App {
+    init() {
+        Task {
+            try? await LuxAnalytics.quickStart(dsn: "your-dsn")
+        }
+    }
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
 }
 ```
 
@@ -113,7 +135,8 @@ let config = try LuxAnalyticsConfiguration(
 
 ```swift
 do {
-    try await LuxAnalytics.shared.track("event_name")
+    let analytics = await LuxAnalytics.shared
+    try await analytics.track("event_name")
 } catch LuxAnalyticsError.analyticsDisabled {
     // Analytics is disabled
 } catch LuxAnalyticsError.notInitialized {
@@ -127,14 +150,13 @@ do {
 
 ```swift
 // Get queue statistics
-if let stats = await LuxAnalytics.getQueueStats() {
-    print("Total events in queue: \(stats.totalEvents)")
-    print("Retriable events: \(stats.retriableEvents)")
-    print("Expired events: \(stats.expiredEvents)")
-}
+let stats = await LuxAnalytics.getQueueStats()
+print("Total events in queue: \(stats.totalEvents)")
+print("Total size bytes: \(stats.totalSizeBytes)")
+print("Failed batch count: \(stats.failedBatchCount)")
 
-// Check network status
-let isOnline = await LuxAnalytics.isNetworkAvailable()
+// Check health
+let isHealthy = await LuxAnalytics.healthCheck()
 
 // Clear queue (use with caution)
 await LuxAnalytics.clearQueue()
@@ -144,11 +166,11 @@ await LuxAnalytics.clearQueue()
 
 ```swift
 // Get diagnostic metrics
-let metrics = await LuxAnalyticsDiagnostics.shared.getMetrics()
-print("Events sent: \(metrics.eventsSent)")
-print("Events failed: \(metrics.eventsFailed)")
-print("Average flush duration: \(metrics.averageFlushDuration)s")
-print("Circuit breaker state: \(metrics.circuitBreakerMetrics.currentState)")
+let metrics = await LuxAnalytics.getDiagnostics()
+print("Events sent: \(metrics.networkStats.totalEventsSent)")
+print("Events failed: \(metrics.networkStats.totalEventsFailed)")
+print("Average flush duration: \(metrics.performanceStats.averageFlushDuration)s")
+print("Circuit breaker state: \(metrics.circuitBreakerStatus?.state ?? "unknown")")
 ```
 
 ## Best Practices
@@ -157,5 +179,5 @@ print("Circuit breaker state: \(metrics.circuitBreakerMetrics.currentState)")
 2. **Use structured metadata**: Keep metadata keys consistent across events
 3. **Handle errors**: Always handle potential errors when tracking events
 4. **Monitor queue size**: Use queue stats to ensure events aren't piling up
-5. **Enable background processing**: Ensure events are sent even when app backgrounds
-6. **Use PII filtering**: Use `trackSanitized` when dealing with user input
+5. **Background processing is automatic**: The SDK handles app lifecycle events automatically
+6. **PII filtering is automatic**: All events are automatically sanitized
