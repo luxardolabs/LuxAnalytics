@@ -129,4 +129,13 @@ extension LuxAnalytics {
     public static func notifyEventsExpired(_ events: [AnalyticsEvent]) async {
         await EventManager.shared.notify(.eventsExpired(events))
     }
+    
+    // Single event convenience methods
+    public static func notifyEventDropped(_ event: AnalyticsEvent, reason: String) async {
+        await EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
+    }
+    
+    public static func notifyEventExpired(_ event: AnalyticsEvent) async {
+        await EventManager.shared.notify(.eventsExpired([event]))
+    }
 }

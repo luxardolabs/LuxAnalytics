@@ -110,7 +110,7 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate {
 
 extension URLSession {
     private static let cacheLock = NSLock()
-    private static var analyticsSessionCache: [String: URLSession] = [:]
+    private static nonisolated(unsafe) var analyticsSessionCache: [String: URLSession] = [:]
     
     /// Create or reuse a URLSession with certificate pinning
     static func analyticsSession(with config: CertificatePinningConfig?) -> URLSession {
