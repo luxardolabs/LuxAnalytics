@@ -154,7 +154,9 @@ public actor LuxAnalyticsQueue {
     public func getQueueStats() -> QueueStats {
         let now = Date()
         let oldestEvent = queueCache.first
+        let newestEvent = queueCache.last
         let oldestEventAge = oldestEvent.map { now.timeIntervalSince($0.queuedAt) }
+        let newestEventAge = newestEvent.map { now.timeIntervalSince($0.queuedAt) }
         
         let activeEvents = queueCache.filter { queuedEvent in
             queuedEvent.retryCount < LuxAnalyticsDefaults.maxRetryAttempts
@@ -165,7 +167,7 @@ public actor LuxAnalyticsQueue {
         
         // Calculate total size
         let totalSizeBytes = queueCache.reduce(0) { total, event in
-            total + (try? JSONEncoder().encode(event).count ?? 0)
+            total + ((try? JSONEncoder().encode(event).count) ?? 0)
         }
         
         return QueueStats(
