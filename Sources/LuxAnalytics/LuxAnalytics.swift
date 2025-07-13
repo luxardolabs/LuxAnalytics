@@ -1,370 +1,354 @@
 import Foundation
-import CryptoKit
+import Compression
+#if canImport(UIKit)
 import UIKit
+#endif
 
-public final class LuxAnalytics: @unchecked Sendable {
-    public static let shared = LuxAnalytics()
-    private var currentUserId: String?
-    private var currentSessionId: String?
-    private var flushTimer: Timer?
+/// Main analytics tracking class
+/// This class must be initialized with a configuration before use
+public final class LuxAnalytics: Sendable {
+    private let analyticsActor: AnalyticsActor
+    private let configuration: LuxAnalyticsConfiguration
     
-    // Configuration - can be overridden in Info.plist
-    private struct Config {
-        static let autoFlushInterval: TimeInterval = {
-            if let interval = Bundle.main.object(forInfoDictionaryKey: "LUX_AUTO_FLUSH_INTERVAL") as? NSNumber {
-                return TimeInterval(interval.doubleValue)
+    /// Shared instance - only available after initialization
+    /// Note: This is now an async property due to actor-based storage
+    public static var shared: LuxAnalytics {
+        get async {
+            guard let instance = await LuxAnalyticsStorage.shared.getInstance() else {
+                // Provide helpful debugging info
+                let callStack = Thread.callStackSymbols.prefix(10).joined(separator: "\n")
+                fatalError("""
+                    
+                    ⚠️ LuxAnalytics.initialize() must be called before accessing shared instance.
+                    
+                    This usually happens when:
+                    1. A @StateObject initializer uses LuxAnalytics
+                    2. A static property initializes before your App.init()
+                    3. A singleton's init() method tracks analytics
+                    
+                    Fix: Move LuxAnalytics.initialize() earlier in your app lifecycle.
+                    See: https://github.com/luxardolabs/LuxAnalytics#initialization-order
+                    
+                    Call stack:
+                    \(callStack)
+                    """)
             }
-            return 30.0 // Default: 30 seconds
-        }()
-        
-        static let maxQueueSize: Int = {
-            if let size = Bundle.main.object(forInfoDictionaryKey: "LUX_MAX_QUEUE_SIZE") as? NSNumber {
-                return size.intValue
-            }
-            return 100 // Default: 100 events
-        }()
-        
-        static let batchSize: Int = {
-            if let size = Bundle.main.object(forInfoDictionaryKey: "LUX_BATCH_SIZE") as? NSNumber {
-                return size.intValue
-            }
-            return 10 // Default: 10 events per batch
-        }()
-        
-        static let isDebugLoggingEnabled: Bool = {
-            if let enabled = Bundle.main.object(forInfoDictionaryKey: "LUX_DEBUG_LOGGING") as? NSNumber {
-                return enabled.boolValue
-            }
-            return false // Default: disabled
-        }()
-        
-        static let requestTimeout: TimeInterval = {
-            if let timeout = Bundle.main.object(forInfoDictionaryKey: "LUX_REQUEST_TIMEOUT") as? NSNumber {
-                return TimeInterval(timeout.doubleValue)
-            }
-            return 10.0 // Default: 10 seconds
-        }()
+            return instance
+        }
     }
     
-    private init() {
-        setupAutoFlush()
-        setupAppLifecycleObservers()
-        debugLog("LuxAnalytics initialized with config: autoFlush=\(Config.autoFlushInterval)s, maxQueue=\(Config.maxQueueSize), batchSize=\(Config.batchSize)")
+    /// Internal access for extensions
+    internal static var _shared: LuxAnalytics? {
+        get async {
+            return await LuxAnalyticsStorage.shared.getInstance()
+        }
+    }
+    
+    /// Initialize LuxAnalytics with configuration
+    /// - Parameter configuration: The analytics configuration
+    /// - Throws: Throws if already initialized
+    public static func initialize(with configuration: LuxAnalyticsConfiguration) async throws {
+        guard await !LuxAnalyticsStorage.shared.isInitialized() else {
+            throw LuxAnalyticsError.alreadyInitialized
+        }
+        
+        // Update debug logging flag synchronously
+        SecureLogger.updateDebugLogging(configuration.debugLogging)
+        
+        await LuxAnalyticsStorage.shared.setConfiguration(configuration)
+        let instance = LuxAnalytics(configuration: configuration)
+        await LuxAnalyticsStorage.shared.setInstance(instance)
+        
+        // Setup after storing instance
+        await instance.analyticsActor.setupAutoFlush()
+        await instance.analyticsActor.setupAppLifecycleObservers()
+    }
+    
+    /// Check if LuxAnalytics is initialized
+    public static var isInitialized: Bool {
+        get async {
+            return await LuxAnalyticsStorage.shared.isInitialized()
+        }
+    }
+    
+    private init(configuration: LuxAnalyticsConfiguration) {
+        self.configuration = configuration
+        self.analyticsActor = AnalyticsActor(configuration: configuration)
     }
     
     deinit {
-        flushTimer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
+        // Cleanup is handled by the actor's own lifecycle
+        SecureLogger.log("LuxAnalytics instance deinit", category: .general, level: .debug)
     }
     
     // MARK: - Public API
     
-    public func setUser(_ userId: String?) {
-        self.currentUserId = userId
-        debugLog("User set: \(userId ?? "nil")")
+    
+    public func setUser(_ userId: String?) async {
+        await analyticsActor.setUser(userId)
     }
     
-    public func setSession(_ sessionId: String?) {
-        self.currentSessionId = sessionId
-        debugLog("Session set: \(sessionId ?? "nil")")
+    public func setSession(_ sessionId: String?) async {
+        await analyticsActor.setSession(sessionId)
     }
 
-    public func track(_ name: String, metadata: [String: String] = [:]) {
-        Task { @MainActor in
-            guard AnalyticsSettings.shared.isEnabled else {
-                debugLog("Analytics disabled, skipping event: \(name)")
-                return
-            }
+    public func track(_ name: String, metadata: [String: String] = [:]) async throws {
+        guard await AnalyticsSettings.shared.isEnabled else {
+            await analyticsActor.debugLog("Analytics disabled, skipping event: \(name)")
+            throw LuxAnalyticsError.analyticsDisabled
+        }
+        
+        guard let config = await LuxAnalyticsStorage.shared.getConfiguration() else {
+            await analyticsActor.debugLog("No configuration set, skipping event: \(name)")
+            throw LuxAnalyticsError.notInitialized
+        }
 
-            var merged = AppAnalyticsContext.shared
-            metadata.forEach { merged[$0] = $1 }
+        var merged = await AppAnalyticsContext.shared.current()
+        metadata.forEach { merged[$0] = $1 }
 
-            let event = AnalyticsEvent(
-                name: name,
-                timestamp: ISO8601DateFormatter().string(from: Date()),
-                userId: currentUserId,
-                sessionId: currentSessionId,
-                metadata: merged
-            )
+        let event = AnalyticsEvent(
+            name: name,
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            userId: await analyticsActor.getUserId(),
+            sessionId: await analyticsActor.getSessionId(),
+            metadata: merged
+        )
 
-            debugLog("Tracking event: \(name) - queuing for batch")
-            
-            // Always queue events for batching - never send immediately
-            LuxAnalyticsQueue.shared.enqueue(event)
-            
-            // Auto-flush if queue is getting full
-            if LuxAnalyticsQueue.shared.queueSize >= Config.maxQueueSize {
-                debugLog("Queue size (\(LuxAnalyticsQueue.shared.queueSize)) reached max (\(Config.maxQueueSize)), flushing batch")
-                Task {
-                    await Self.flushAsync()
-                }
-            }
+        await analyticsActor.debugLog("Tracking event: \(name) - queuing for batch")
+        
+        // Always queue events for batching - never send immediately
+        await LuxAnalyticsQueue.shared.enqueue(event)
+        
+        // Notify via async stream
+        await LuxAnalytics.notifyEventQueued(event)
+        
+        // Auto-flush if queue is getting full
+        if await LuxAnalyticsQueue.shared.queueSize >= config.maxQueueSize {
+            await analyticsActor.debugLog("Queue size reached max, flushing batch")
+            await Self.flush()
         }
     }
     
     // MARK: - Flush Methods
     
-    // Modern async/await API
-    public static func flushAsync() async {
-        let isEnabled = await MainActor.run { AnalyticsSettings.shared.isEnabled }
-        guard isEnabled else { return }
-        await shared.debugLogAsync("Async flush requested")
-        await LuxAnalyticsQueue.shared.flushBatch(using: _sendBatchAsync, batchSize: Config.batchSize)
-    }
-    
-    // Legacy flush for backwards compatibility
-    public static func flush() {
-        Task {
-            await flushAsync()
-        }
-    }
-    
-    // Background flush for older iOS versions
-    public static func flushBackground(completion: @escaping () -> Void = {}) {
-        Task {
-            let isEnabled = await MainActor.run { AnalyticsSettings.shared.isEnabled }
-            guard isEnabled else {
-                completion()
-                return
-            }
-            await shared.debugLogAsync("Background flush requested")
-            
-            if #available(iOS 15.0, *) {
-                await flushAsync()
-                completion()
-            } else {
-                LuxAnalyticsQueue.shared.flushBackground(
-                    using: _sendBatchBackground,
-                    batchSize: Config.batchSize,
-                    completion: completion
-                )
-            }
-        }
-    }
-    
-    public func enableDebugLogging(_ enabled: Bool) {
-        debugLog("Debug logging is controlled via LUX_DEBUG_LOGGING in Info.plist")
-    }
-    
-    // MARK: - Private Implementation
-    
-    private func setupAutoFlush() {
-        guard Config.autoFlushInterval > 0 else {
-            debugLog("Auto-flush disabled (interval = 0)")
+    /// Manually flush queued events to the server
+    public static func flush() async {
+        guard let instance = await _shared else { return }
+        guard await AnalyticsSettings.shared.isEnabled else { return }
+        guard let config = await LuxAnalyticsStorage.shared.getConfiguration() else { return }
+        
+        await instance.analyticsActor.debugLog("Starting flush...")
+        
+        // Check network connectivity first
+        guard await NetworkMonitor.shared.isConnected else {
+            await instance.analyticsActor.debugLog("No network connection, skipping flush")
             return
         }
         
-        flushTimer = Timer.scheduledTimer(withTimeInterval: Config.autoFlushInterval, repeats: true) { _ in
-            Task {
-                await Self.shared.debugLogAsync("Auto-flush timer triggered")
-                await Self.flushAsync()
-            }
-        }
-        debugLog("Auto-flush timer set to \(Config.autoFlushInterval) seconds")
-    }
-    
-    private func setupAppLifecycleObservers() {
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task {
-                await Self.shared.debugLogAsync("App entering background, flushing events")
-                await Self.flushAsync()
-            }
+        // Don't flush if circuit breaker is open for this endpoint
+        if await GlobalCircuitBreaker.shared.isOpen(for: config.apiURL) {
+            await instance.analyticsActor.debugLog("Circuit breaker open for \(config.apiURL), skipping flush")
+            return
         }
         
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            // For app termination, we need to wait briefly for flush
-            let group = DispatchGroup()
-            group.enter()
-            
-            Task {
-                await Self.shared.debugLogAsync("App terminating, flushing events")
-                await Self.flushAsync()
-                group.leave()
-            }
-            
-            // Wait up to 2 seconds for flush to complete
-            _ = group.wait(timeout: .now() + 2.0)
+        let eventsToSend = await LuxAnalyticsQueue.shared.dequeue(limit: config.batchSize)
+        guard !eventsToSend.isEmpty else {
+            await instance.analyticsActor.debugLog("No events to flush")
+            return
         }
         
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task {
-                if await LuxAnalyticsQueue.shared.queueSize > 0 {
-                    await Self.shared.debugLogAsync("App became active with \(await LuxAnalyticsQueue.shared.queueSize) queued events, flushing")
-                    await Self.flushAsync()
-                }
-            }
-        }
-    }
-    
-    private func debugLog(_ message: String) {
-        guard Config.isDebugLoggingEnabled else { return }
-        print("[LuxAnalytics] \(message)")
-    }
-    
-    private func debugLogAsync(_ message: String) async {
-        guard Config.isDebugLoggingEnabled else { return }
-        await MainActor.run {
-            print("[LuxAnalytics] \(message)")
-        }
-    }
-
-    // MARK: - Network Implementation
-    
-    // Modern async/await network implementation
-    private static func _sendBatchAsync(_ events: [AnalyticsEvent]) async -> Bool {
-        return await _sendEventsAsync(events, asBatch: true)
-    }
-    
-    private static func _sendEventAsync(_ event: AnalyticsEvent) async -> Bool {
-        return await _sendEventsAsync([event], asBatch: false)
-    }
-    
-    private static func _sendEventsAsync(_ events: [AnalyticsEvent], asBatch: Bool) async -> Bool {
-        let payload: Data
+        await instance.analyticsActor.debugLog("Flushing \(eventsToSend.count) events...")
         
-        if asBatch && events.count > 1 {
-            let batchPayload = ["events": events]
-            guard let data = try? JSONEncoder().encode(batchPayload) else {
-                await shared.debugLogAsync("Failed to encode batch payload")
-                return false
-            }
-            payload = data
-        } else {
-            guard let data = try? JSONEncoder().encode(events.first!) else {
-                await shared.debugLogAsync("Failed to encode single event payload")
-                return false
-            }
-            payload = data
-        }
-
-        let timestamp = String(Int(Date().timeIntervalSince1970))
+        let urlSession = URLSession.analyticsSession(with: config.certificatePinning)
+        await instance.sendBatch(eventsToSend, using: urlSession)
+    }
+    
+    
+    // MARK: - Clear Queue
+    
+    public static func clearQueue() async {
+        await LuxAnalyticsQueue.shared.clear()
+    }
+    
+    
+    // MARK: - Network Management
+    
+    public static func isNetworkAvailable() async -> Bool {
+        return await NetworkMonitor.shared.isConnected
+    }
+    
+    // MARK: - Queue Stats
+    
+    public static func getQueueStats() async -> QueueStats {
+        return await LuxAnalyticsQueue.shared.getQueueStats()
+    }
+    
+    // MARK: - Health Check
+    public static func healthCheck() async -> Bool {
+        guard await isInitialized else { return false }
+        guard let config = await LuxAnalyticsStorage.shared.getConfiguration() else { return false }
         
-        let key = SymmetricKey(data: Data(await MainActor.run { AnalyticsConfig.hmacSecret }.utf8))
-        let message = payload + Data(timestamp.utf8)
-        let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
-        let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
+        // Basic connectivity check
+        let isConnected = await NetworkMonitor.shared.isConnected
+        let circuitBreakerOpen = await GlobalCircuitBreaker.shared.isOpen(for: config.apiURL)
+        
+        return isConnected && !circuitBreakerOpen
+    }
+}
 
-        var req = URLRequest(url: await MainActor.run { AnalyticsConfig.endpoint })
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(signature, forHTTPHeaderField: "X-Signature")
-        req.setValue(await MainActor.run { AnalyticsConfig.keyId }, forHTTPHeaderField: "X-Key-ID")
-        req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
-        req.httpBody = payload
-        req.timeoutInterval = Config.requestTimeout
+// MARK: - Event Stream Notifications
 
-        await shared.debugLogAsync("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
 
+// MARK: - Batch Sending
+
+extension LuxAnalytics {
+    
+    private func sendBatch(_ events: [QueuedEvent], using session: URLSession) async {
+        guard let config = await LuxAnalyticsStorage.shared.getConfiguration() else { return }
+        
         do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            
-            if let http = response as? HTTPURLResponse {
-                let success = (200..<300).contains(http.statusCode)
-                if success {
-                    await shared.debugLogAsync("Successfully sent \(events.count) event(s)")
-                } else {
-                    await shared.debugLogAsync("Server error: HTTP \(http.statusCode)")
-                    if let responseString = String(data: data, encoding: .utf8) {
-                        await shared.debugLogAsync("Response: \(responseString)")
-                    }
-                }
-                return success
-            }
-            return false
-        } catch {
-            await shared.debugLogAsync("Network error: \(error.localizedDescription)")
-            return false
-        }
-    }
-    
-    // Background implementation for older iOS versions
-    private static func _sendBatchBackground(_ events: [AnalyticsEvent], completion: @escaping (Bool) -> Void) {
-        _sendEventsBackground(events, asBatch: true, completion: completion)
-    }
-    
-    private static func _sendEventsBackground(_ events: [AnalyticsEvent], asBatch: Bool, completion: @escaping (Bool) -> Void) {
-        // Always perform network operations on background queue
-        DispatchQueue.global(qos: .utility).async {
-            let payload: Data
-            
-            if asBatch && events.count > 1 {
-                let batchPayload = ["events": events]
-                guard let data = try? JSONEncoder().encode(batchPayload) else {
-                    DispatchQueue.main.async {
-                        shared.debugLog("Failed to encode batch payload")
-                        completion(false)
-                    }
-                    return
-                }
-                payload = data
+            // Prepare the payload
+            let batchPayload: [String: Any]
+            if events.count == 1 {
+                // Single event - send as is
+                batchPayload = try events[0].event.toDictionary()
             } else {
-                guard let data = try? JSONEncoder().encode(events.first!) else {
-                    DispatchQueue.main.async {
-                        shared.debugLog("Failed to encode single event payload")
-                        completion(false)
-                    }
-                    return
-                }
-                payload = data
+                // Multiple events - wrap in batch
+                let eventDicts = try events.map { try $0.event.toDictionary() }
+                batchPayload = ["events": eventDicts]
             }
-
-            let timestamp = String(Int(Date().timeIntervalSince1970))
             
-            let key = SymmetricKey(data: Data(AnalyticsConfig.hmacSecret.utf8))
-            let message = payload + Data(timestamp.utf8)
-            let mac = HMAC<SHA256>.authenticationCode(for: message, using: key)
-            let signature = Data(mac).map { String(format: "%02x", $0) }.joined()
-
-            var req = URLRequest(url: AnalyticsConfig.endpoint)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.setValue(signature, forHTTPHeaderField: "X-Signature")
-            req.setValue(AnalyticsConfig.keyId, forHTTPHeaderField: "X-Key-ID")
-            req.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
-            req.httpBody = payload
-            req.timeoutInterval = Config.requestTimeout
-
-            DispatchQueue.main.async {
-                shared.debugLog("Sending \(asBatch ? "batch" : "single") request with \(events.count) event(s)")
+            let jsonData = try JSONSerialization.data(withJSONObject: batchPayload, options: .sortedKeys)
+            
+            // Check compression
+            let shouldCompress = config.compressionEnabled && jsonData.count >= config.compressionThreshold
+            let payloadData: Data
+            
+            if shouldCompress {
+                guard let compressed = jsonData.zlibCompressed() else {
+                    throw LuxAnalyticsError.encodingError(NSError(domain: "LuxAnalytics", code: -1, userInfo: [NSLocalizedDescriptionKey: "Compression failed"]))
+                }
+                payloadData = compressed
+                await analyticsActor.debugLog("Compressed payload: \(jsonData.count) -> \(compressed.count) bytes")
+            } else {
+                payloadData = jsonData
             }
-
-            URLSession.shared.dataTask(with: req) { data, response, error in
-                var success = false
-                
-                if let error = error {
-                    DispatchQueue.main.async {
-                        shared.debugLog("Network error: \(error.localizedDescription)")
+            
+            // Create the request
+            var request = URLRequest(url: config.apiURL.appendingPathComponent(config.projectId))
+            request.httpMethod = "POST"
+            request.httpBody = payloadData
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(LuxAnalyticsVersion.fullVersion, forHTTPHeaderField: "User-Agent")
+            
+            if shouldCompress {
+                request.setValue("deflate", forHTTPHeaderField: "Content-Encoding")
+            }
+            
+            // Add Basic Auth header
+            let authString = "\(config.publicId):"
+            if let authData = authString.data(using: .utf8) {
+                let base64Auth = authData.base64EncodedString()
+                request.setValue("Basic \(base64Auth)", forHTTPHeaderField: "Authorization")
+            }
+            
+            request.timeoutInterval = config.requestTimeout
+            
+            // Send the request
+            let (data, response) = try await session.data(for: request)
+            
+            // Handle response
+            if let httpResponse = response as? HTTPURLResponse {
+                switch httpResponse.statusCode {
+                case 200...299:
+                    await analyticsActor.debugLog("Successfully sent \(events.count) events")
+                    await GlobalCircuitBreaker.shared.recordSuccess(for: config.apiURL)
+                    
+                    // Notify success for each event
+                    for queuedEvent in events {
+                        await LuxAnalytics.notifyEventsSent([queuedEvent.event])
                     }
-                } else if let http = response as? HTTPURLResponse {
-                    success = (200..<300).contains(http.statusCode)
-                    DispatchQueue.main.async {
-                        if success {
-                            shared.debugLog("Successfully sent \(events.count) event(s)")
+                    
+                    // Update diagnostics
+                    await LuxAnalyticsDiagnostics.shared.recordEventsSent(count: events.count)
+                    await LuxAnalyticsDiagnostics.shared.recordBytesTransmitted(bytes: payloadData.count)
+                    
+                case 400...499:
+                    // Client error - don't retry
+                    let responseString = String(data: data, encoding: .utf8)
+                    let error = LuxAnalyticsError.serverError(statusCode: httpResponse.statusCode, response: responseString)
+                    await analyticsActor.debugLog("Client error: \(error)")
+                    
+                    // Drop events as they won't succeed
+                    for queuedEvent in events {
+                        let luxError = error
+                        await LuxAnalytics.notifyEventsFailed([queuedEvent.event], error: luxError)
+                    }
+                    
+                    await LuxAnalyticsDiagnostics.shared.recordEventsFailed(count: events.count, error: error)
+                    
+                default:
+                    // Server error - will retry
+                    let responseString = String(data: data, encoding: .utf8)
+                    let error = LuxAnalyticsError.serverError(statusCode: httpResponse.statusCode, response: responseString)
+                    await analyticsActor.debugLog("Server error: \(error)")
+                    
+                    await GlobalCircuitBreaker.shared.recordFailure(for: config.apiURL)
+                    
+                    // Requeue events for retry if under max attempts
+                    for queuedEvent in events {
+                        if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {
+                            var updatedEvent = queuedEvent
+                            updatedEvent.retryCount += 1
+                            updatedEvent.lastAttemptAt = Date()
+                            await LuxAnalyticsQueue.shared.enqueue(updatedEvent)
                         } else {
-                            shared.debugLog("Server error: HTTP \(http.statusCode)")
-                            if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                                shared.debugLog("Response: \(responseString)")
-                            }
+                            await LuxAnalytics.notifyEventsDropped(count: 1, reason: .dropOldest)
                         }
                     }
+                    
+                    await LuxAnalyticsDiagnostics.shared.recordEventsFailed(count: events.count, error: error)
                 }
-                
-                DispatchQueue.main.async {
-                    completion(success)
+            }
+            
+        } catch {
+            await analyticsActor.debugLog("Failed to send batch: \(error)")
+            await GlobalCircuitBreaker.shared.recordFailure(for: config.apiURL)
+            
+            // Requeue events for retry
+            for queuedEvent in events {
+                if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {
+                    var updatedEvent = queuedEvent
+                    updatedEvent.retryCount += 1
+                    updatedEvent.lastAttemptAt = Date()
+                    await LuxAnalyticsQueue.shared.enqueue(updatedEvent)
+                } else {
+                    await LuxAnalytics.notifyEventsDropped(count: 1, reason: .dropOldest)
                 }
-            }.resume()
+            }
+            
+            await LuxAnalyticsDiagnostics.shared.recordEventsFailed(count: events.count, error: error)
+        }
+    }
+}
+
+// MARK: - Compression
+
+extension Data {
+    func zlibCompressed() -> Data? {
+        return self.withUnsafeBytes { bytes in
+            let buffer = UnsafeBufferPointer<UInt8>(start: bytes.bindMemory(to: UInt8.self).baseAddress, count: self.count)
+            let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
+            defer { destinationBuffer.deallocate() }
+            
+            let compressedSize = compression_encode_buffer(
+                destinationBuffer, count,
+                buffer.baseAddress!, count,
+                nil, COMPRESSION_ZLIB
+            )
+            
+            guard compressedSize > 0 else { return nil }
+            return Data(bytes: destinationBuffer, count: compressedSize)
         }
     }
 }

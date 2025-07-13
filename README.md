@@ -1,18 +1,21 @@
 # LuxAnalytics
 
-A **privacy-first**, **high-performance** analytics SDK for iOS built with Swift concurrency best practices. LuxAnalytics provides the core infrastructure for event tracking while letting you build app-specific convenience layers on top.
+A **privacy-first**, **high-performance** analytics SDK for iOS 18+ built with Swift 6 and modern concurrency. LuxAnalytics provides secure, reliable event tracking with automatic batching, offline support, and enterprise-grade features. **Zero compilation warnings** with full iOS 18 and Swift 6 strict concurrency compliance.
 
 ## ✨ Key Features
 
-- 🔒 **Privacy-First Core** - Secure foundation, you control what data gets tracked
-- ⚡ **Zero Main Thread Blocking** - All network operations are fully asynchronous  
-- 🎯 **iOS 18 & Swift 6 Ready** - Uses modern Swift concurrency patterns
-- 📦 **Automatic Event Batching** - Efficient network usage with intelligent batching
-- 🔐 **HMAC Authentication** - Secure event transmission with cryptographic signatures
-- 🚀 **Auto-Flush Management** - Handles app lifecycle events automatically
-- 💾 **Persistent Queue** - Events persist across app launches
-- 🎨 **Highly Configurable** - Customize behavior via Info.plist
-- 🛡️ **Production Ready** - Thoroughly tested for enterprise use
+- 🔒 **Privacy-First** - Automatic PII filtering, encrypted queue storage
+- ⚡ **100% Async/Await** - Modern Swift concurrency throughout
+- 🎯 **Swift 6 Compliant** - Full actor isolation and data race safety with zero warnings
+- ✨ **Perfect Build Quality** - Zero compilation warnings on iOS 18.5 + Swift 6
+- 📦 **Smart Batching** - Automatic event batching with configurable sizes
+- 🔐 **DSN Authentication** - Simple configuration with Basic Auth
+- 🚀 **Lifecycle Aware** - Automatic flush on background/terminate
+- 💾 **Persistent Queue** - Encrypted event storage with AES-256-GCM
+- 📡 **Offline Support** - Network monitoring with automatic retry
+- 🔄 **Circuit Breaker** - Protects against failing endpoints
+- 📊 **Real-time Monitoring** - AsyncStream for event notifications
+- 🛡️ **Production Ready** - Comprehensive error handling and recovery
 
 ## 🚀 Quick Start
 
@@ -26,551 +29,323 @@ dependencies: [
 ]
 ```
 
-### Configuration
-
-Add these keys to your app's `Info.plist`:
-
-```xml
-<key>LUX_API_URL</key>
-<string>https://your-analytics-endpoint.com/api/events</string>
-<key>LUX_HMAC_SECRET</key>
-<string>your-hmac-secret-key</string>
-<key>LUX_KEY_ID</key>
-<string>your-api-key-id</string>
-
-<!-- Optional Configuration -->
-<key>LUX_AUTO_FLUSH_INTERVAL</key>
-<real>30.0</real>
-<key>LUX_MAX_QUEUE_SIZE</key>
-<integer>100</integer>
-<key>LUX_BATCH_SIZE</key>
-<integer>10</integer>
-<key>LUX_DEBUG_LOGGING</key>
-<true/>
-<key>LUX_REQUEST_TIMEOUT</key>
-<real>10.0</real>
-```
-
-### Basic Usage
+### Basic Setup
 
 ```swift
 import LuxAnalytics
 
-// Initialize (typically in your App struct)
-LuxAnalytics.shared.setUser("user-123")
-LuxAnalytics.shared.setSession(UUID().uuidString)
-
-// Track events
-LuxAnalytics.shared.track("user_signup", metadata: [
-    "method": "email",
-    "campaign": "holiday_promotion"
-])
-
-// Manual flush (optional - auto-flush handles most cases)
-LuxAnalytics.flush()
-```
-
-## 📊 Core API
-
-The LuxAnalytics package provides these core methods:
-
-### Event Tracking
-```swift
-// Basic event tracking
-LuxAnalytics.shared.track("event_name", metadata: ["key": "value"])
-
-// User & session management
-LuxAnalytics.shared.setUser("user-id")
-LuxAnalytics.shared.setSession("session-id")
-```
-
-### Settings Management
-```swift
-// Enable/disable analytics
-AnalyticsSettings.shared.isEnabled = true
-
-// Check current state
-if AnalyticsSettings.shared.isEnabled {
-    // Track event
-}
-```
-
-### Manual Flushing
-```swift
-// Simple flush (recommended)
-LuxAnalytics.flush()
-
-// Async flush (iOS 15+)
-await LuxAnalytics.flushAsync()
-
-// Background flush with completion
-LuxAnalytics.flushBackground {
-    print("Flush completed")
-}
-```
-
-### Queue Management
-```swift
-// Check queue size
-let queueSize = LuxAnalyticsQueue.shared.queueSize
-
-// Events are automatically queued and batched
-// Manual queue management is typically not needed
-```
-
-## 🏗️ Architecture
-
-### Event Flow
-```
-[Track Event] → [Queue] → [Auto Batch] → [HMAC Sign] → [Send] → [Retry on Fail]
-     ↓              ↓           ↓             ↓          ↓           ↓
-[Metadata]    [Persist]   [Background]   [Security]  [Async]  [Persistent]
-```
-
-### Automatic Behaviors
-- **Auto-Flush**: Every 30 seconds (configurable)
-- **App Lifecycle**: Flushes on background/terminate
-- **Queue Management**: Auto-flush when queue reaches max size
-- **Persistence**: Events survive app crashes/force quits
-- **Thread Safety**: All operations are thread-safe
-
-## 🎯 Building App-Specific Extensions
-
-LuxAnalytics is designed to be extended with app-specific convenience methods. Here's an example from a real app (LuxBox) that shows the recommended patterns:
-
-### Example: Privacy-First Gift Card App Extension
-
-```swift
-// LuxAnalytics+LuxBox.swift - App-specific extension
-import LuxAnalytics
-
-extension LuxAnalytics {
-    
-    // MARK: - App-Specific Screen Names
-    struct Screens {
-        static let dashboard = "dashboard"
-        static let cardList = "card_list"
-        static let settings = "settings"
-        static let addCard = "add_card"
-        // ... more screens
-    }
-    
-    struct Features {
-        static let cardManagement = "card_management"
-        static let analytics = "analytics"
-        static let settings = "settings"
-        // ... more features
-    }
-    
-    // MARK: - Privacy-Safe Value Sanitizers
-    static func sanitizeAmount(_ amount: Double) -> String {
-        switch amount {
-        case 0: return "zero"
-        case 0.01..<10: return "under_10"
-        case 10..<25: return "10_to_25"
-        case 25..<50: return "25_to_50"
-        case 50..<100: return "50_to_100"
-        case 100..<250: return "100_to_250"
-        default: return "over_250"
-        }
-    }
-    
-    static func sanitizeMerchantName(_ name: String) -> String {
-        let lowercased = name.lowercased()
-        
-        if lowercased.contains("coffee") || lowercased.contains("starbucks") {
-            return "coffee_shop"
-        } else if lowercased.contains("restaurant") || lowercased.contains("food") {
-            return "restaurant"
-        } else if lowercased.contains("retail") || lowercased.contains("store") {
-            return "retail_store"
-        }
-        
-        return "other_merchant"
-    }
-    
-    static func sanitizeCount(_ count: Int) -> String {
-        switch count {
-        case 0: return "none"
-        case 1: return "one"
-        case 2...5: return "few"
-        case 6...10: return "several"
-        default: return "many"
-        }
-    }
-    
-    // MARK: - Convenient Tracking Methods
-    static func trackButtonTap(
-        _ buttonName: String,
-        screen: String,
-        feature: String? = nil,
-        additionalMetadata: [String: String] = [:]
-    ) {
-        var metadata = additionalMetadata
-        metadata["button_name"] = buttonName
-        metadata["screen"] = screen
-        
-        if let feature = feature {
-            metadata["feature"] = feature
-        }
-        
-        shared.track("button_tapped", metadata: metadata)
-    }
-    
-    static func trackScreen(
-        _ screenName: String,
-        feature: String? = nil,
-        previousScreen: String? = nil,
-        additionalMetadata: [String: String] = [:]
-    ) {
-        var metadata = additionalMetadata
-        metadata["screen"] = screenName
-        
-        if let feature = feature {
-            metadata["feature"] = feature
-        }
-        
-        if let previousScreen = previousScreen {
-            metadata["previous_screen"] = previousScreen
-        }
-        
-        shared.track("screen_viewed", metadata: metadata)
-    }
-    
-    // MARK: - Domain-Specific Tracking
-    static func trackCardAction(
-        _ action: String,
-        card: GiftCard,
-        source: String? = nil,
-        additionalMetadata: [String: String] = [:]
-    ) {
-        var metadata = additionalMetadata
-        
-        // Privacy-safe card metadata using sanitizers
-        metadata["merchant_category"] = sanitizeMerchantName(card.retailer)
-        metadata["card_value_range"] = sanitizeAmount(card.amount)
-        metadata["balance_range"] = sanitizeAmount(card.balance)
-        metadata["usage_level"] = sanitizeUsagePercentage(card.usagePercentage)
-        metadata["is_favorite"] = String(card.isFavorite)
-        metadata["tag_count"] = sanitizeCount(card.tags.count)
-        
-        if let source = source {
-            metadata["source"] = source
-        }
-        
-        metadata["feature"] = Features.cardManagement
-        
-        shared.track("card_\(action)", metadata: metadata)
-    }
-    
-    static func trackError(
-        type: String,
-        message: String,
-        screen: String,
-        feature: String,
-        fatal: Bool = false,
-        additionalMetadata: [String: String] = [:]
-    ) {
-        var metadata = additionalMetadata
-        metadata["error_type"] = type
-        
-        // Sanitize error messages to remove PII
-        let sanitizedMessage = message
-            .replacingOccurrences(of: #"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"#, 
-                                with: "[EMAIL]", options: .regularExpression)
-            .replacingOccurrences(of: #"\b\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\b"#, 
-                                with: "[CARD_NUMBER]", options: .regularExpression)
-        
-        metadata["error_message"] = sanitizedMessage
-        metadata["screen"] = screen
-        metadata["feature"] = feature
-        metadata["is_fatal"] = String(fatal)
-        
-        shared.track("error_occurred", metadata: metadata)
-    }
-}
-```
-
-### Usage Examples from Real App
-
-```swift
-// Screen tracking
-LuxAnalytics.trackScreen(
-    LuxAnalytics.Screens.dashboard,
-    feature: LuxAnalytics.Features.analytics,
-    additionalMetadata: [
-        "load_time_ms": String(loadTime)
-    ]
-)
-
-// Button interactions
-LuxAnalytics.trackButtonTap(
-    "export_data",
-    screen: LuxAnalytics.Screens.settings,
-    feature: LuxAnalytics.Features.settings,
-    additionalMetadata: [
-        "export_format": "json",
-        "item_count_range": LuxAnalytics.sanitizeCount(itemCount)
-    ]
-)
-
-// Domain-specific tracking with privacy protection
-LuxAnalytics.trackCardAction(
-    "created",
-    card: newCard,
-    source: "add_card_form",
-    additionalMetadata: [
-        "creation_method": "manual_entry",
-        "has_image": String(hasImage)
-    ]
-)
-
-// Performance tracking
-LuxAnalytics.trackPerformance(
-    operation: "load_dashboard",
-    durationMs: loadTime,
-    success: true,
-    additionalMetadata: [
-        "data_source": "core_data"
-    ]
-)
-```
-
-### SwiftUI Integration Example
-
-```swift
-#if canImport(SwiftUI)
-import SwiftUI
-
-@available(iOS 13.0, *)
-extension View {
-    func trackOnAppear(screen: String, feature: String? = nil) -> some View {
-        self.onAppear {
-            LuxAnalytics.trackScreen(screen, feature: feature)
-        }
-    }
-    
-    func trackTap(buttonName: String, screen: String) -> some View {
-        self.onTapGesture {
-            LuxAnalytics.trackButtonTap(buttonName, screen: screen)
-        }
-    }
-}
-#endif
-
-// Usage in SwiftUI
-struct SettingsView: View {
-    var body: some View {
-        VStack {
-            Button("Export Data") {
-                // action
-            }
-            .trackTap(buttonName: "export_data", screen: "settings")
-        }
-        .trackOnAppear(screen: "settings", feature: "settings")
-    }
-}
-```
-
-## ⚙️ Configuration Options
-
-All configuration is done via `Info.plist`:
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `LUX_API_URL` | String | Required | Your analytics endpoint URL |
-| `LUX_HMAC_SECRET` | String | Required | HMAC secret for request signing |
-| `LUX_KEY_ID` | String | Required | API key identifier |
-| `LUX_AUTO_FLUSH_INTERVAL` | Number | 30.0 | Auto-flush interval in seconds |
-| `LUX_MAX_QUEUE_SIZE` | Number | 100 | Max events before forced flush |
-| `LUX_BATCH_SIZE` | Number | 10 | Events per batch |
-| `LUX_DEBUG_LOGGING` | Boolean | false | Enable debug console logs |
-| `LUX_REQUEST_TIMEOUT` | Number | 10.0 | Network timeout in seconds |
-
-## 🔒 Security & Privacy
-
-### HMAC Authentication
-All requests are signed with HMAC-SHA256:
-```
-signature = HMAC-SHA256(payload + timestamp, secret)
-```
-
-### Privacy Features
-- **No automatic PII collection** - You control all data
-- **Local queue encryption** - Events stored securely
-- **Configurable data retention** - You control server-side storage
-- **User consent integration** - Easily disable via `AnalyticsSettings.shared.isEnabled`
-
-### Privacy Best Practices
-1. **Sanitize sensitive data** - Use range buckets instead of exact values
-2. **Avoid PII in events** - Don't track emails, names, addresses
-3. **Use categorical data** - Track "coffee_shop" not "Starbucks on 5th St"
-4. **Implement user controls** - Let users disable analytics
-
-## 🛠️ Advanced Usage
-
-### App Lifecycle Integration
-
-```swift
 @main
 struct MyApp: App {
+    init() {
+        Task {
+            // Initialize with DSN
+            try await LuxAnalytics.quickStart(
+                dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id"
+            )
+        }
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .onAppear {
-                    setupAnalytics()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-                    LuxAnalytics.flush() // Auto-handled, but explicit is fine
-                }
         }
     }
+}
+```
+
+### Track Events
+
+```swift
+// Track events with async/await
+let analytics = await LuxAnalytics.shared
+try await analytics.track("user_signup", metadata: [
+    "method": "email",
+    "source": "app"
+])
+
+// User identification
+await analytics.setUser("user-123")
+await analytics.setSession("session-456")
+```
+
+## 📋 Core API Reference
+
+### Initialization
+
+```swift
+// Quick start with minimal config
+try await LuxAnalytics.quickStart(
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
+    debugLogging: true
+)
+
+// Or initialize from Info.plist
+try await LuxAnalytics.initializeFromPlist()
+
+// Or with full configuration
+let config = try LuxAnalyticsConfiguration(
+    dsn: "your-dsn",
+    autoFlushInterval: 30.0,
+    maxQueueSize: 500,
+    batchSize: 50,
+    debugLogging: true
+)
+try await LuxAnalytics.initialize(with: config)
+```
+
+### Event Tracking
+
+All SDK operations are async and require `await`:
+
+```swift
+// Get the shared instance
+let analytics = await LuxAnalytics.shared
+
+// Track events
+try await analytics.track("event_name", metadata: [
+    "key": "value",
+    "timestamp": ISO8601DateFormatter().string(from: Date())
+])
+
+// Set user and session (these are async too!)
+await analytics.setUser("user-123")
+await analytics.setSession("session-456")
+
+// Clear user on logout
+await analytics.setUser(nil)
+```
+
+### Queue Management
+
+```swift
+// Manual flush
+await LuxAnalytics.flush()
+
+// Get queue statistics  
+let stats = await LuxAnalytics.getQueueStats()
+print("Events in queue: \(stats.totalEvents)")
+print("Queue size: \(ByteCountFormatter.string(fromByteCount: Int64(stats.totalSizeBytes), countStyle: .file))")
+
+// Clear queue (use with caution)
+await LuxAnalytics.clearQueue()
+
+// Check health
+let isHealthy = await LuxAnalytics.healthCheck()
+```
+
+## 🔧 Configuration
+
+### Info.plist Configuration
+
+Add these keys to your Info.plist:
+
+```xml
+<!-- Required -->
+<key>LuxAnalyticsDSN</key>
+<string>https://your-public-id@analytics.example.com/api/v1/events/your-project-id</string>
+
+<!-- Optional (showing defaults) -->
+<key>LuxAnalyticsDebugLogging</key>
+<false/>
+
+<key>LuxAnalyticsAutoFlushInterval</key>
+<real>30.0</real>
+
+<key>LuxAnalyticsMaxQueueSize</key>
+<integer>500</integer>
+
+<key>LuxAnalyticsBatchSize</key>
+<integer>50</integer>
+
+<key>LuxAnalyticsRequestTimeout</key>
+<real>60.0</real>
+
+<key>LuxAnalyticsCompressionEnabled</key>
+<true/>
+```
+
+### Programmatic Configuration
+
+```swift
+let config = try LuxAnalyticsConfiguration(
+    // Required
+    dsn: "https://your-public-id@analytics.example.com/api/v1/events/your-project-id",
     
-    private func setupAnalytics() {
-        LuxAnalytics.shared.setUser(getUserID())
-        LuxAnalytics.shared.setSession(UUID().uuidString)
+    // Performance tuning
+    autoFlushInterval: 30.0,        // Seconds between auto-flushes
+    maxQueueSize: 500,              // Events before forcing flush
+    batchSize: 50,                  // Events per network request
+    
+    // Network settings
+    requestTimeout: 60.0,           // Network timeout in seconds
+    maxRetryAttempts: 5,            // Retry attempts for failed requests
+    
+    // Queue management
+    maxQueueSizeHard: 10000,        // Hard limit before dropping events
+    eventTTL: 604800,               // Event time-to-live: 7 days
+    overflowStrategy: .dropOldest,  // What to do when queue is full
+    
+    // Compression
+    compressionEnabled: true,       // Enable zlib compression
+    compressionThreshold: 1024,     // Compress if payload > 1KB
+    
+    // Debugging
+    debugLogging: false,            // Enable console logging
+    
+    // Security (optional)
+    certificatePinning: nil         // Certificate pinning config
+)
+
+try await LuxAnalytics.initialize(with: config)
+```
+
+## 📱 Real-time Event Monitoring
+
+Monitor analytics events as they flow through the system:
+
+```swift
+Task {
+    for await notification in LuxAnalyticsEvents.eventStream {
+        switch notification {
+        case .eventQueued(let event):
+            print("📤 Event queued: \(event.name)")
+            
+        case .eventsSent(let events):
+            print("✅ Sent \(events.count) events")
+            
+        case .eventsFailed(let events, let error):
+            print("❌ Failed to send \(events.count) events: \(error)")
+            
+        case .eventsDropped(let count, let reason):
+            print("⚠️ Dropped \(count) events: \(reason)")
+            
+        case .eventsExpired(let events):
+            print("⏰ Expired \(events.count) old events")
+        }
+    }
+}
+```
+
+## 🏗️ Building App-Specific Layers
+
+Create convenience wrappers for your app's specific needs:
+
+```swift
+extension LuxAnalytics {
+    /// App-specific screen tracking
+    static func trackScreen(_ name: String) async {
+        guard UserDefaults.standard.bool(forKey: "analytics_enabled") else { return }
         
-        LuxAnalytics.shared.track("app_launched", metadata: [
-            "launch_type": isFirstLaunch() ? "first_launch" : "subsequent_launch"
+        let analytics = await LuxAnalytics.shared
+        try? await analytics.track("screen_view", metadata: [
+            "screen_name": name,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ])
+    }
+    
+    /// Privacy-conscious purchase tracking
+    static func trackPurchase(amount: Double, currency: String = "USD") async {
+        let analytics = await LuxAnalytics.shared
+        
+        // Sanitize exact amounts for privacy
+        let range = switch amount {
+            case ..<10: "$0-10"
+            case 10..<50: "$10-50"
+            case 50..<100: "$50-100"
+            case 100..<500: "$100-500"
+            default: "$500+"
+        }
+        
+        try? await analytics.track("purchase", metadata: [
+            "amount_range": range,
+            "currency": currency
         ])
     }
 }
+
+// Usage
+await LuxAnalytics.trackScreen("home")
+await LuxAnalytics.trackPurchase(amount: 49.99)
 ```
 
-### Error Handling
+## 🛡️ Security Features
+
+- **Automatic PII Filtering**: Redacts emails, phone numbers, SSNs, etc.
+- **Queue Encryption**: AES-256-GCM encryption for persisted events
+- **Certificate Pinning**: Optional SSL certificate validation
+- **Secure Logging**: All logs are automatically sanitized
+- **DSN Authentication**: Simple and secure Basic Auth
+
+## 🔍 Debugging
+
+### Enable Debug Logging
 
 ```swift
-// LuxAnalytics handles network failures gracefully
-// Events are queued and retried automatically
-// No special error handling needed in your app
+// Via configuration
+try await LuxAnalytics.quickStart(
+    dsn: "your-dsn",
+    debugLogging: true
+)
 
-// But you can track your own errors:
-do {
-    try performRiskyOperation()
-} catch {
-    LuxAnalytics.trackError(
-        type: "operation_failed",
-        message: error.localizedDescription,
-        screen: "current_screen",
-        feature: "risky_operations"
-    )
+// Or at runtime
+await LuxAnalytics.enableDiagnosticMode()
+```
+
+### Debug Utilities
+
+```swift
+// Check initialization status
+await LuxAnalyticsDebug.validateSetup()
+
+// Print current status
+await LuxAnalyticsDebug.status()
+
+// Get metrics
+let metrics = await LuxAnalytics.getMetrics()
+```
+
+### Common Issues
+
+**"Cannot find 'LuxAnalytics' in scope"**
+- Make sure you've imported the module: `import LuxAnalytics`
+
+**"'async' property access in a function that does not support concurrency"**
+- All LuxAnalytics APIs are async. Make sure you're calling from an async context:
+```swift
+Task {
+    let analytics = await LuxAnalytics.shared
+    try await analytics.track("event")
 }
 ```
 
-### Performance Monitoring
+**Events not sending**
+- Check network connectivity: `await LuxAnalytics.isNetworkAvailable()`
+- Verify configuration: `await LuxAnalyticsDebug.validateSetup()`
+- Check circuit breaker: `await LuxAnalytics.getCircuitBreakerStatus()`
 
-```swift
-func loadData() async {
-    let startTime = Date()
-    
-    do {
-        let data = try await fetchData()
-        let duration = Int(Date().timeIntervalSince(startTime) * 1000)
-        
-        LuxAnalytics.trackPerformance(
-            operation: "fetch_data",
-            durationMs: duration,
-            success: true,
-            itemCount: data.count
-        )
-    } catch {
-        let duration = Int(Date().timeIntervalSince(startTime) * 1000)
-        
-        LuxAnalytics.trackPerformance(
-            operation: "fetch_data",
-            durationMs: duration,
-            success: false
-        )
-    }
-}
-```
+## 📋 Requirements
 
-## 🧪 Testing
-
-### Disable in Tests
-```swift
-// In your test setup
-override func setUp() {
-    super.setUp()
-    AnalyticsSettings.shared.isEnabled = false
-}
-```
-
-### Mock for Unit Tests
-```swift
-// Create a test-specific configuration
-class MockLuxAnalytics {
-    static var trackedEvents: [(String, [String: String])] = []
-    
-    static func track(_ name: String, metadata: [String: String] = [:]) {
-        trackedEvents.append((name, metadata))
-    }
-    
-    static func reset() {
-        trackedEvents.removeAll()
-    }
-}
-```
-
-## 📈 Best Practices
-
-### Event Naming
-```swift
-// ✅ Good - Clear, consistent naming
-"button_tapped"
-"screen_viewed"
-"card_created"
-"error_occurred"
-
-// ❌ Avoid - Inconsistent or unclear
-"btnClick"
-"pageView"
-"newCard"
-"exception"
-```
-
-### Metadata Structure
-```swift
-// ✅ Good - Consistent, useful metadata
-LuxAnalytics.shared.track("purchase_completed", metadata: [
-    "amount_range": "10_to_25",           // Sanitized amount
-    "category": "electronics",            // Category, not specific item
-    "payment_method": "credit_card",      // Method type
-    "is_first_purchase": "true"           // Boolean as string
-])
-
-// ❌ Avoid - PII or overly specific data
-LuxAnalytics.shared.track("purchase_completed", metadata: [
-    "amount": "23.47",                    // Exact amount
-    "item": "iPhone 15 Pro Max 256GB",   // Specific product
-    "credit_card": "4532-****-****-1234" // PII
-])
-```
-
-### Performance Considerations
-- Events are queued locally and sent in batches
-- Network operations never block the main thread
-- Auto-flush handles most scenarios - manual flushing rarely needed
-- Queue persists across app launches
+- **iOS 18.0+** 
+- **Swift 6.0+**
+- **Xcode 16.0+**
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
-LuxAnalytics is available under the GNU General Public License v3.0. See LICENSE file for details.
+LuxAnalytics is available under the MIT license. See [LICENSE](LICENSE) for details.
 
 ## 🆘 Support
 
-- **Issues**: [GitHub Issues](https://github.com/luxardolabs/LuxAnalytics/issues)
-- **Documentation**: See inline code documentation
-- **Examples**: Check the `/Examples` directory
+- 📧 Email: support@luxardolabs.com
+- 🐛 Issues: [GitHub Issues](https://github.com/luxardolabs/LuxAnalytics/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/luxardolabs/LuxAnalytics/discussions)
 
----
+## 📚 Additional Resources
 
-**LuxAnalytics** - Privacy-first analytics that respects your users and performs beautifully. 🚀
+- [API Documentation](https://luxardolabs.github.io/LuxAnalytics/)
+- [Example App](Example/)
+- [Security Guide](SECURITY.md)
+- [Migration Guide](MIGRATION.md)

@@ -1,13 +1,27 @@
 import Foundation
 
-public final class AnalyticsSettings: @unchecked Sendable {
+/// Actor-based analytics settings for thread-safe access
+public actor AnalyticsSettings {
     public static let shared = AnalyticsSettings()
-    private let key = "lux_analytics_enabled"
-
+    private let key = "com.luxardolabs.LuxAnalytics.enabled"
+    private let userDefaults: UserDefaults
+    
+    /// Current enabled state (cached)
+    private var cachedIsEnabled: Bool
+    
     public var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get {
+            return cachedIsEnabled
+        }
     }
-
-    private init() {}
+    
+    public func setEnabled(_ enabled: Bool) {
+        cachedIsEnabled = enabled
+        userDefaults.set(enabled, forKey: key)
+    }
+    
+    private init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        self.cachedIsEnabled = userDefaults.object(forKey: key) as? Bool ?? true
+    }
 }
