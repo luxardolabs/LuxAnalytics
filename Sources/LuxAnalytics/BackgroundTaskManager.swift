@@ -1,5 +1,7 @@
 import Foundation
+#if os(iOS)
 import BackgroundTasks
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -8,8 +10,10 @@ import UIKit
 @MainActor
 public final class BackgroundTaskManager {
     
+#if os(iOS)
     /// Background task identifier
     public static let taskIdentifier = "com.luxardolabs.LuxAnalytics.flush"
+#endif
     
     /// Shared instance
     public static let shared = BackgroundTaskManager()
@@ -18,16 +22,19 @@ public final class BackgroundTaskManager {
     
     /// Register background tasks (call from AppDelegate)
     public func registerBackgroundTasks() {
+#if os(iOS)
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.taskIdentifier,
             using: nil
         ) { task in
             self.handleBackgroundTask(task)
         }
+#endif
     }
     
     /// Schedule a background task
     public func scheduleBackgroundFlush() {
+#if os(iOS)
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
@@ -40,13 +47,17 @@ public final class BackgroundTaskManager {
         } catch {
             SecureLogger.log("Failed to schedule background task: \(error)", category: .error, level: .error)
         }
+#endif
     }
     
     /// Cancel pending background tasks
     public func cancelBackgroundTasks() {
+#if os(iOS)
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+#endif
     }
     
+#if os(iOS)
     private func handleBackgroundTask(_ task: BGTask) {
         // Schedule next background task
         scheduleBackgroundFlush()
@@ -63,6 +74,7 @@ public final class BackgroundTaskManager {
             task.setTaskCompleted(success: false)
         }
     }
+#endif
 }
 
 // MARK: - App Lifecycle Integration

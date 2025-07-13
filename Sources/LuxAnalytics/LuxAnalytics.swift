@@ -1,4 +1,5 @@
 import Foundation
+import Compression
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -355,26 +356,19 @@ extension LuxAnalytics {
 
 extension Data {
     func zlibCompressed() -> Data? {
-        return self.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> Data? in
-            let sourceBuffer = bytes.bindMemory(to: UInt8.self)
-            let sourceLength = self.count
-            
-            let destinationLength = sourceLength + 64
-            let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: destinationLength)
+        return self.withUnsafeBytes { bytes in
+            let buffer = UnsafeBufferPointer<UInt8>(start: bytes.bindMemory(to: UInt8.self).baseAddress, count: self.count)
+            let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
             defer { destinationBuffer.deallocate() }
             
-            var stream = z_stream()
-            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: sourceBuffer.baseAddress)
-            stream.avail_in = uInt(sourceLength)
-            stream.next_out = destinationBuffer
-            stream.avail_out = uInt(destinationLength)
+            let compressedSize = compression_encode_buffer(
+                destinationBuffer, count,
+                buffer.baseAddress!, count,
+                nil, COMPRESSION_ZLIB
+            )
             
-            guard deflateInit(&stream, Z_DEFAULT_COMPRESSION) == Z_OK else { return nil }
-            defer { deflateEnd(&stream) }
-            
-            guard deflate(&stream, Z_FINISH) == Z_STREAM_END else { return nil }
-            
-            return Data(bytes: destinationBuffer, count: destinationLength - Int(stream.avail_out))
+            guard compressedSize > 0 else { return nil }
+            return Data(bytes: destinationBuffer, count: compressedSize)
         }
     }
 }

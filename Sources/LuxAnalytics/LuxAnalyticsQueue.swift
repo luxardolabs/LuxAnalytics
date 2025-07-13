@@ -1,5 +1,14 @@
 import Foundation
 
+/// Statistics about the event queue
+public struct QueueStats: Sendable {
+    public let totalEvents: Int
+    public let totalSizeBytes: Int
+    public let oldestEventAge: TimeInterval?
+    public let newestEventAge: TimeInterval?
+    public let failedBatchCount: Int
+}
+
 /// Actor-based queue for thread-safe event management with retry logic
 public actor LuxAnalyticsQueue {
     public static let shared = LuxAnalyticsQueue()
@@ -161,10 +170,10 @@ public actor LuxAnalyticsQueue {
         
         return QueueStats(
             totalEvents: queueCache.count,
-            activeEvents: activeEvents.count,
-            expiredEvents: expiredEvents.count,
+            totalSizeBytes: totalSizeBytes,
             oldestEventAge: oldestEventAge,
-            totalSizeBytes: totalSizeBytes
+            newestEventAge: newestEventAge,
+            failedBatchCount: failedBatchIds.count
         )
     }
     
