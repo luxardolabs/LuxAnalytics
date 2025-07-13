@@ -120,7 +120,7 @@ public final class LuxAnalytics: Sendable {
         await LuxAnalyticsQueue.shared.enqueue(event)
         
         // Notify via async stream
-        await LuxAnalyticsEvents.notifyEventQueued(event)
+        await LuxAnalytics.notifyEventQueued(event)
         
         // Auto-flush if queue is getting full
         if await LuxAnalyticsQueue.shared.queueSize >= config.maxQueueSize {
@@ -266,7 +266,7 @@ extension LuxAnalytics {
                     
                     // Notify success for each event
                     for queuedEvent in events {
-                        await Self.notifyEventSent(queuedEvent.event)
+                        await LuxAnalytics.notifyEventsSent([queuedEvent.event])
                     }
                     
                     // Update diagnostics
@@ -281,7 +281,8 @@ extension LuxAnalytics {
                     
                     // Drop events as they won't succeed
                     for queuedEvent in events {
-                        await Self.notifyEventFailed(queuedEvent.event, error: error)
+                        let luxError = error as? LuxAnalyticsError ?? .networkError(error)
+                        await LuxAnalytics.notifyEventsFailed([queuedEvent.event], error: luxError)
                     }
                     
                     await LuxAnalyticsDiagnostics.shared.recordEventsFailed(count: events.count, error: error)
@@ -296,13 +297,13 @@ extension LuxAnalytics {
                     
                     // Requeue events for retry if under max attempts
                     for queuedEvent in events {
-                        if queuedEvent.shouldRetry(maxAttempts: config.maxRetryAttempts) {
+                        if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {
                             var updatedEvent = queuedEvent
                             updatedEvent.retryCount += 1
                             updatedEvent.lastAttemptAt = Date()
                             await LuxAnalyticsQueue.shared.enqueue(updatedEvent)
                         } else {
-                            await Self.notifyEventDropped(queuedEvent.event, reason: "Max retries exceeded")
+                            await LuxAnalytics.notifyEventsDropped(count: 1, reason: .dropOldest)
                         }
                     }
                     
@@ -316,13 +317,13 @@ extension LuxAnalytics {
             
             // Requeue events for retry
             for queuedEvent in events {
-                if queuedEvent.shouldRetry(maxAttempts: config.maxRetryAttempts) {
+                if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {
                     var updatedEvent = queuedEvent
                     updatedEvent.retryCount += 1
                     updatedEvent.lastAttemptAt = Date()
                     await LuxAnalyticsQueue.shared.enqueue(updatedEvent)
                 } else {
-                    await Self.notifyEventDropped(queuedEvent.event, reason: "Max retries exceeded")
+                    await LuxAnalytics.notifyEventsDropped(count: 1, reason: .dropOldest)
                 }
             }
             

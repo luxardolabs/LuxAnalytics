@@ -1,4 +1,4 @@
-import Foundation
+@preconcurrency import Foundation
 import CryptoKit
 #if canImport(UIKit)
 import UIKit
@@ -10,7 +10,7 @@ actor AnalyticsActor {
     private var currentUserId: String?
     private var currentSessionId: String?
     private var flushTask: Task<Void, Never>?
-    private var notificationObservers: [NSObjectProtocol] = []
+    private nonisolated(unsafe) var notificationObservers: [NSObjectProtocol] = []
     
     init(configuration: LuxAnalyticsConfiguration) {
         self.configuration = configuration
@@ -46,42 +46,49 @@ actor AnalyticsActor {
     func setupAppLifecycleObservers() {
         #if canImport(UIKit)
         Task { @MainActor in
-            let backgroundObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { [weak self] in
-                    await self?.handleAppBackground()
-                }
-            }
-            notificationObservers.append(backgroundObserver)
-            
-            let terminateObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.willTerminateNotification,
-                object: nil,
-                queue: .main
-            ) { _ in
-                Task {
-                    await LuxAnalytics.flush()
-                }
-            }
-            notificationObservers.append(terminateObserver)
-            
-            // Memory warning handling
-            let memoryObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.didReceiveMemoryWarningNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { [weak self] in
-                    await self?.handleMemoryWarning()
-                }
-            }
-            notificationObservers.append(memoryObserver)
+            await self.registerNotificationObservers()
         }
         #endif
     }
+    
+    #if canImport(UIKit)
+    @MainActor
+    private func registerNotificationObservers() async {
+        let backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { [weak self] in
+                await self?.handleAppBackground()
+            }
+        }
+        await self.addNotificationObserver(backgroundObserver)
+        
+        let terminateObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task {
+                await LuxAnalytics.flush()
+            }
+        }
+        await self.addNotificationObserver(terminateObserver)
+        
+        // Memory warning handling
+        let memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { [weak self] in
+                await self?.handleMemoryWarning()
+            }
+        }
+        await self.addNotificationObserver(memoryObserver)
+    }
+    #endif
     
     func cleanup() {
         flushTask?.cancel()
@@ -114,12 +121,27 @@ actor AnalyticsActor {
     private func removeLifecycleObservers() {
         #if canImport(UIKit)
         Task { @MainActor in
-            notificationObservers.forEach { observer in
+            let observers = await self.getNotificationObservers()
+            observers.forEach { observer in
                 NotificationCenter.default.removeObserver(observer)
             }
-            notificationObservers.removeAll()
+            await self.clearNotificationObservers()
         }
         #endif
+    }
+    
+    
+    
+    private func clearNotificationObservers() {
+        notificationObservers.removeAll()
+    }
+    
+    private func addNotificationObserver(_ observer: NSObjectProtocol) {
+        notificationObservers.append(observer)
+    }
+    
+    private func getNotificationObservers() -> [NSObjectProtocol] {
+        return notificationObservers
     }
     
     private func handleAppBackground() async {
@@ -143,7 +165,8 @@ actor AnalyticsActor {
     deinit {
         // Ensure cleanup happens
         #if canImport(UIKit)
-        notificationObservers.forEach { observer in
+        let observers = notificationObservers
+        observers.forEach { observer in
             NotificationCenter.default.removeObserver(observer)
         }
         #endif

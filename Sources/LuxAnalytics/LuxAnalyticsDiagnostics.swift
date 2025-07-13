@@ -153,7 +153,7 @@ public actor LuxAnalyticsDiagnostics {
         // Get circuit breaker status
         let circuitBreakerMetrics = await LuxAnalytics.getCircuitBreakerStatus()
         let circuitBreakerStatus = LuxAnalyticsMetrics.CircuitBreakerStatus(
-            state: circuitBreakerMetrics?.currentState ?? .closed,
+            state: String(describing: circuitBreakerMetrics?.currentState ?? .closed),
             failureCount: circuitBreakerMetrics?.failureCount ?? 0,
             successRate: circuitBreakerMetrics?.successRate ?? 0.0,
             timeInCurrentState: circuitBreakerMetrics?.timeInCurrentState ?? 0.0
