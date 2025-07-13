@@ -331,7 +331,7 @@ Task {
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
@@ -345,7 +345,7 @@ LuxAnalytics is available under the MIT license. See [LICENSE](LICENSE) for deta
 
 ## 📚 Additional Resources
 
+- [Changelog](docs/CHANGELOG.md)
+- [Usage Examples](docs/EXAMPLE.md)
+- [Security Guide](docs/SECURITY.md)
 - [API Documentation](https://luxardolabs.github.io/LuxAnalytics/)
-- [Example App](Example/)
-- [Security Guide](SECURITY.md)
-- [Migration Guide](MIGRATION.md)
