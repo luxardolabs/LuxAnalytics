@@ -69,9 +69,9 @@ await analytics.setSession("session-456")
 | Topic | Description |
 |-------|-------------|
 | [📖 **Complete Guide**](docs/wiki/) | Comprehensive documentation and tutorials |
-| [⚡ **Quick Examples**](docs/EXAMPLE.md) | Common usage patterns and code examples |
+| [⚡ **Quick Start**](docs/wiki/Quick-Start.md) | Get running in under 5 minutes |
 | [🔧 **Configuration**](docs/wiki/Configuration.md) | Detailed setup and customization options |
-| [🔒 **Security**](docs/SECURITY.md) | Privacy features and security practices |
+| [🔒 **Privacy & Security**](docs/wiki/Privacy-Security.md) | Privacy-first architecture and data protection |
 | [🚀 **API Reference**](docs/wiki/API-Reference.md) | Complete API documentation |
 | [🐛 **Troubleshooting**](docs/wiki/Troubleshooting.md) | Common issues and solutions |
 
