@@ -7,8 +7,9 @@ Thank you for your interest in contributing to LuxAnalytics!
 ### Requirements
 - macOS 14.0+
 - Xcode 16.0+
-- Swift 6.0
+- Swift 6.0 with strict concurrency enabled
 - iOS 18.0+ deployment target
+- **Zero compilation warnings** standard
 
 ### Getting Started
 
