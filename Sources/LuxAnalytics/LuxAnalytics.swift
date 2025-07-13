@@ -120,7 +120,7 @@ public final class LuxAnalytics: Sendable {
         await LuxAnalyticsQueue.shared.enqueue(event)
         
         // Notify via async stream
-        await Self.notifyEventQueued(event)
+        await LuxAnalyticsEvents.notifyEventQueued(event)
         
         // Auto-flush if queue is getting full
         if await LuxAnalyticsQueue.shared.queueSize >= config.maxQueueSize {
@@ -198,27 +198,6 @@ public final class LuxAnalytics: Sendable {
 
 // MARK: - Event Stream Notifications
 
-extension LuxAnalytics {
-    static func notifyEventQueued(_ event: AnalyticsEvent) async {
-        await LuxAnalyticsEvents.shared.notifyQueued(event)
-    }
-    
-    static func notifyEventSent(_ event: AnalyticsEvent) async {
-        await LuxAnalyticsEvents.shared.notifySent(event)
-    }
-    
-    static func notifyEventFailed(_ event: AnalyticsEvent, error: Error) async {
-        await LuxAnalyticsEvents.shared.notifyFailed(event, error: error)
-    }
-    
-    static func notifyEventDropped(_ event: AnalyticsEvent, reason: String) async {
-        await LuxAnalyticsEvents.shared.notifyDropped(event, reason: reason)
-    }
-    
-    static func notifyEventExpired(_ event: AnalyticsEvent) async {
-        await LuxAnalyticsEvents.shared.notifyExpired(event)
-    }
-}
 
 // MARK: - Batch Sending
 

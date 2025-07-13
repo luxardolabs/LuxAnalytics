@@ -1,7 +1,7 @@
 import Foundation
 
 /// Modern async event stream for monitoring analytics events
-public struct LuxAnalyticsEvents {
+public struct LuxAnalyticsEvents: Sendable {
     
     /// Stream of analytics events as they occur
     public static var eventStream: AsyncStream<AnalyticsEventNotification> {

@@ -17,48 +17,48 @@ actor GlobalCircuitBreaker {
     private init() {}
     
     /// Check if circuit breaker is open for a given URL
-    func isOpen(for url: URL) -> Bool {
+    func isOpen(for url: URL) async -> Bool {
         let breaker = getOrCreateBreaker(for: url)
-        return breaker.currentState == .open
+        return await breaker.currentState == .open
     }
     
     /// Record a successful request for a URL
-    func recordSuccess(for url: URL) {
+    func recordSuccess(for url: URL) async {
         let breaker = getOrCreateBreaker(for: url)
-        breaker.recordSuccess()
+        await breaker.recordSuccess()
     }
     
     /// Record a failed request for a URL
-    func recordFailure(for url: URL) {
+    func recordFailure(for url: URL) async {
         let breaker = getOrCreateBreaker(for: url)
-        breaker.recordFailure()
+        await breaker.recordFailure()
     }
     
     /// Get metrics for a specific URL
-    func getMetrics(for url: URL) -> CircuitBreakerMetrics {
+    func getMetrics(for url: URL) async -> CircuitBreakerMetrics {
         let breaker = getOrCreateBreaker(for: url)
-        return breaker.getMetrics()
+        return await breaker.getMetrics()
     }
     
     /// Get metrics for all URLs
-    func getAllMetrics() -> [URL: CircuitBreakerMetrics] {
+    func getAllMetrics() async -> [URL: CircuitBreakerMetrics] {
         var metrics: [URL: CircuitBreakerMetrics] = [:]
         for (url, breaker) in circuitBreakers {
-            metrics[url] = breaker.getMetrics()
+            metrics[url] = await breaker.getMetrics()
         }
         return metrics
     }
     
     /// Reset circuit breaker for a specific URL
-    func reset(for url: URL) {
+    func reset(for url: URL) async {
         let breaker = getOrCreateBreaker(for: url)
-        breaker.reset()
+        await breaker.reset()
     }
     
     /// Reset all circuit breakers
-    func resetAll() {
+    func resetAll() async {
         for breaker in circuitBreakers.values {
-            breaker.reset()
+            await breaker.reset()
         }
     }
     
