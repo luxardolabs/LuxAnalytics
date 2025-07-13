@@ -30,6 +30,12 @@ public actor AppAnalyticsContext {
         cachedContext = await generateContext()
     }
     
+    /// Modern TestFlight detection for iOS 18+
+    private static func isTestFlightBuild() -> Bool {
+        // Fallback: Check for embedded.mobileprovision (indicates development/TestFlight)
+        return Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil
+    }
+    
     private func generateContext() async -> [String: String] {
         let deviceId = await getOrCreateDeviceID()
         
@@ -46,7 +52,7 @@ public actor AppAnalyticsContext {
                 "locale": Locale.current.identifier,
                 "timezone": TimeZone.current.identifier,
                 "device_id": deviceId,
-                "is_testflight": Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" ? "true" : "false"
+                "is_testflight": Self.isTestFlightBuild() ? "true" : "false"
             ]
         }
         #else

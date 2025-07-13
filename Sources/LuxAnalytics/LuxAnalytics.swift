@@ -281,7 +281,7 @@ extension LuxAnalytics {
                     
                     // Drop events as they won't succeed
                     for queuedEvent in events {
-                        let luxError = error as? LuxAnalyticsError ?? .networkError(error)
+                        let luxError = error
                         await LuxAnalytics.notifyEventsFailed([queuedEvent.event], error: luxError)
                     }
                     

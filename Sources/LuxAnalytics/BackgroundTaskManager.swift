@@ -92,7 +92,7 @@ extension BackgroundTaskManager {
         #if canImport(UIKit)
         var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
         
-        backgroundTaskID = await UIApplication.shared.beginBackgroundTask(withName: "LuxAnalytics.flush") {
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "LuxAnalytics.flush") {
             // Expiration handler
             Task { @MainActor in
                 if backgroundTaskID != .invalid {
