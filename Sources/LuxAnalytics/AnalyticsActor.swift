@@ -103,7 +103,7 @@ actor AnalyticsActor {
         // If queue is large, flush it
         if stats.totalEvents > (configuration.maxQueueSize / 2) {
             debugLog("Flushing \(stats.totalEvents) events due to memory warning")
-            await LuxAnalytics.flushAsync()
+            await LuxAnalytics.flush()
         }
         
         // Clear any cached data
@@ -131,7 +131,7 @@ actor AnalyticsActor {
             guard let self = self else { return }
             
             // Flush events
-            await LuxAnalytics.flushAsync()
+            await LuxAnalytics.flush()
             await self.debugLog("Background flush completed")
         }
         #else

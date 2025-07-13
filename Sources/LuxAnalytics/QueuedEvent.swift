@@ -1,17 +1,19 @@
 import Foundation
 
 /// Wrapper for queued events with metadata for retry and TTL management
-struct QueuedEvent: Codable {
-    let event: AnalyticsEvent
-    let queuedAt: Date
-    var retryCount: Int
-    var lastRetryAt: Date?
+public struct QueuedEvent: Codable, Sendable {
+    public let event: AnalyticsEvent
+    public let queuedAt: Date
+    public var retryCount: Int
+    public var lastRetryAt: Date?
+    public var lastAttemptAt: Date?
     
-    init(event: AnalyticsEvent) {
+    public init(event: AnalyticsEvent) {
         self.event = event
         self.queuedAt = Date()
         self.retryCount = 0
         self.lastRetryAt = nil
+        self.lastAttemptAt = nil
     }
     
     /// Check if event has expired based on TTL

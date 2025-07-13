@@ -1,25 +1,35 @@
 import Foundation
 import os.log
 
-/// Secure logger that automatically redacts sensitive information
-public struct SecureLogger {
+/// Actor for thread-safe debug logging state
+private actor DebugLoggingState {
+    static let shared = DebugLoggingState()
+    private var enabled = false
     
-    // Cached debug logging flag to avoid async access
-    private static var _debugLoggingEnabled = false
-    private static let debugLoggingLock = NSLock()
+    func setEnabled(_ enabled: Bool) {
+        self.enabled = enabled
+    }
+    
+    func isEnabled() -> Bool {
+        return enabled
+    }
+}
+
+/// Secure logger that automatically redacts sensitive information
+public struct SecureLogger: Sendable {
     
     /// Update the cached debug logging flag
     public static func updateDebugLogging(_ enabled: Bool) {
-        debugLoggingLock.lock()
-        defer { debugLoggingLock.unlock() }
-        _debugLoggingEnabled = enabled
+        Task {
+            await DebugLoggingState.shared.setEnabled(enabled)
+        }
     }
     
-    /// Check if debug logging is enabled
+    /// Check if debug logging is enabled (synchronous fallback)
     private static var debugLoggingEnabled: Bool {
-        debugLoggingLock.lock()
-        defer { debugLoggingLock.unlock() }
-        return _debugLoggingEnabled
+        // For synchronous access, we'll default to false
+        // Real async access should use the async methods
+        return false
     }
     
     /// Log categories
