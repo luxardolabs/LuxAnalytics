@@ -19,11 +19,13 @@ Complete documentation for LuxAnalytics iOS SDK.
 - [💡 **Best Practices**](Best-Practices.md) - Production-ready patterns and architectures
 - [🐛 **Troubleshooting**](Troubleshooting.md) - Comprehensive debugging and solutions
 
+### Advanced Topics
+- [📦 **Queue Management**](Queue-Management.md) - Deep dive into event queue mechanics and optimization
+- [⚡ **Performance Optimization**](Performance.md) - Advanced performance tuning and monitoring
+- [📡 **Network & Offline**](Network-Offline.md) - Network handling and offline strategies
+- [🛡️ **Error Handling**](Error-Handling.md) - Comprehensive error management and recovery
+
 ### Coming Soon
-- [📦 Queue Management](Queue-Management.md) - Deep dive into event queue mechanics
-- [⚡ Performance Optimization](Performance.md) - Advanced performance tuning
-- [📡 Network & Offline](Network-Offline.md) - Network handling and offline strategies
-- [🛡️ Error Handling](Error-Handling.md) - Advanced error management patterns
 - [📱 SwiftUI Integration](SwiftUI-Integration.md) - SwiftUI-specific best practices
 - [🎯 UIKit Integration](UIKit-Integration.md) - UIKit integration patterns
 - [🏗️ Architecture Patterns](Architecture-Patterns.md) - Recommended app architectures
@@ -41,4 +43,6 @@ Complete documentation for LuxAnalytics iOS SDK.
 
 **Having issues?** Check [Troubleshooting](Troubleshooting.md) → [API Reference](API-Reference.md)
 
-**Want deep technical details?** See [User Management](User-Management.md) → [Privacy & Security](Privacy-Security.md) → [Best Practices](Best-Practices.md)
+**Want deep technical details?** See [Queue Management](Queue-Management.md) → [Performance Optimization](Performance.md) → [Error Handling](Error-Handling.md)
+
+**Building production apps?** See [Best Practices](Best-Practices.md) → [Network & Offline](Network-Offline.md) → [Privacy & Security](Privacy-Security.md)
