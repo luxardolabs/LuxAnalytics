@@ -120,12 +120,8 @@ actor AnalyticsActor {
     
     private func removeLifecycleObservers() {
         #if canImport(UIKit)
-        Task { @MainActor in
-            let observers = await self.getNotificationObservers()
-            observers.forEach { observer in
-                NotificationCenter.default.removeObserver(observer)
-            }
-            await self.clearNotificationObservers()
+        Task {
+            await self.unregisterNotificationObservers()
         }
         #endif
     }
@@ -140,8 +136,20 @@ actor AnalyticsActor {
         notificationObservers.append(observer)
     }
     
-    private func getNotificationObservers() -> [NSObjectProtocol] {
-        return notificationObservers
+    private func unregisterNotificationObservers() async {
+        // We need to handle this without crossing actor boundaries
+        // Since NSObjectProtocol is not Sendable, we'll use nonisolated(unsafe) access
+        let observers = notificationObservers  // This is already nonisolated(unsafe)
+        
+        // Switch to main actor for NotificationCenter operations
+        await MainActor.run {
+            observers.forEach { observer in
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+        
+        // Clear the array
+        clearNotificationObservers()
     }
     
     private func handleAppBackground() async {
