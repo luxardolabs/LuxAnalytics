@@ -1,164 +1,187 @@
 import Foundation
 
-public final class LuxAnalyticsQueue: Sendable {
-    public static let shared = LuxAnalyticsQueue()
-    private let queueKey = "lux_event_queue"
-    private let lock = NSLock()
+/// Statistics about the event queue
+public struct QueueStats: Sendable, Codable {
+    public let totalEvents: Int
+    public let totalSizeBytes: Int
+    public let oldestEventAge: TimeInterval?
+    public let newestEventAge: TimeInterval?
+    public let failedBatchCount: Int
+}
 
-    private init() {}
+/// Actor-based queue for thread-safe event management with retry logic
+public actor LuxAnalyticsQueue {
+    public static let shared = LuxAnalyticsQueue()
+    private let queueKey = "com.luxardolabs.LuxAnalytics.eventQueue.v2"
+    private let userDefaults: UserDefaults
+    
+    /// In-memory cache of the queue
+    private var queueCache: [QueuedEvent] = []
+    
+    /// Track failed batch IDs to prevent infinite retries
+    private var failedBatchIds: Set<String> = []
+    
+    private init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        // Queue will be loaded on first access
+        self.queueCache = []
+        // Clean expired events on startup
+        Task {
+            await loadAndCleanQueue()
+        }
+    }
+    
+    private func loadAndCleanQueue() {
+        self.queueCache = loadQueue() ?? []
+        cleanExpiredEvents(ttlSeconds: LuxAnalyticsDefaults.eventTTL)
+    }
 
     public var queueSize: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return getQueue()?.count ?? 0
+        return queueCache.count
     }
 
     public func enqueue(_ event: AnalyticsEvent) {
-        lock.lock()
-        defer { lock.unlock() }
-        
-        var queue = getQueue() ?? []
-        queue.append(event)
-        save(queue)
+        let queuedEvent = QueuedEvent(event: event)
+        queueCache.append(queuedEvent)
+        saveQueue()
+    }
+    
+    public func enqueue(_ queuedEvent: QueuedEvent) {
+        queueCache.append(queuedEvent)
+        saveQueue()
+    }
+    
+    /// Dequeue events for sending
+    public func dequeue(limit: Int) -> [QueuedEvent] {
+        let eventsToSend = Array(queueCache.prefix(limit))
+        if !eventsToSend.isEmpty {
+            queueCache.removeFirst(min(limit, queueCache.count))
+            saveQueue()
+        }
+        return eventsToSend
     }
 
-    // Legacy method for backwards compatibility
-    public func flush(using send: @escaping (AnalyticsEvent) async -> Bool) async {
-        lock.lock()
-        guard let queue = getQueue(), !queue.isEmpty else {
-            lock.unlock()
-            return
-        }
-        let eventsToProcess = queue
-        lock.unlock()
-
-        var sent: [AnalyticsEvent] = []
-        var failed: [AnalyticsEvent] = []
+    // MARK: - Queue Management
+    
+    private func cleanExpiredEvents(ttlSeconds: TimeInterval) {
+        let before = queueCache.count
+        let expiredEvents = queueCache.filter { $0.isExpired(ttlSeconds: ttlSeconds) }.map { $0.event }
+        queueCache = queueCache.filter { !$0.isExpired(ttlSeconds: ttlSeconds) }
+        let after = queueCache.count
         
-        for event in eventsToProcess {
-            let success = await send(event)
-            if success {
-                sent.append(event)
-            } else {
-                failed.append(event)
-            }
-        }
-        
-        lock.lock()
-        save(failed)
-        lock.unlock()
-    }
-
-    public func flushBatch(using sendBatch: @escaping ([AnalyticsEvent]) async -> Bool, batchSize: Int = 10) async {
-        lock.lock()
-        guard let queue = getQueue(), !queue.isEmpty else {
-            lock.unlock()
-            return
-        }
-        let eventsToProcess = queue
-        lock.unlock()
-
-        var remaining = eventsToProcess
-        var failedEvents: [AnalyticsEvent] = []
-        
-        while !remaining.isEmpty {
-            let batch = Array(remaining.prefix(batchSize))
-            remaining = Array(remaining.dropFirst(batchSize))
-            
-            let success = await sendBatch(batch)
-            if !success {
-                // Failed - collect this batch and all remaining as failed
-                failedEvents.append(contentsOf: batch)
-                failedEvents.append(contentsOf: remaining)
-                break
-            }
-        }
-        
-        lock.lock()
-        save(failedEvents)
-        lock.unlock()
-    }
-
-    // iOS 15+ async variant
-    @available(iOS 15.0, *)
-    public func flushAsync(using sendBatch: @escaping ([AnalyticsEvent]) async -> Bool, batchSize: Int = 10) async {
-        await flushBatch(using: sendBatch, batchSize: batchSize)
-    }
-
-    // Background queue variant for older iOS versions
-    public func flushBackground(using sendBatch: @escaping ([AnalyticsEvent], @escaping (Bool) -> Void) -> Void, batchSize: Int = 10, completion: @escaping () -> Void = {}) {
-        lock.lock()
-        guard let queue = getQueue(), !queue.isEmpty else {
-            lock.unlock()
-            completion()
-            return
-        }
-        let eventsToProcess = queue
-        lock.unlock()
-
-        var remaining = eventsToProcess
-        var failedEvents: [AnalyticsEvent] = []
-        let group = DispatchGroup()
-        let failedLock = NSLock()
-        
-        func processBatch() {
-            guard !remaining.isEmpty else {
-                // All done, save any failed events
-                self.lock.lock()
-                self.save(failedEvents)
-                self.lock.unlock()
-                completion()
-                return
-            }
-            
-            let batch = Array(remaining.prefix(batchSize))
-            remaining = Array(remaining.dropFirst(batchSize))
-            
-            group.enter()
-            sendBatch(batch) { success in
-                if !success {
-                    failedLock.lock()
-                    failedEvents.append(contentsOf: batch)
-                    failedEvents.append(contentsOf: remaining)
-                    remaining = [] // Stop processing
-                    failedLock.unlock()
+        if before != after {
+            saveQueue()
+            SecureLogger.log("Cleaned \(before - after) expired events from queue", category: .queue, level: .info)
+            if !expiredEvents.isEmpty {
+                Task {
+                    for event in expiredEvents {
+                        await LuxAnalyticsEvents.notifyEventExpired(event)
+                    }
                 }
-                group.leave()
+            }
+        }
+    }
+    
+    private func handleQueueOverflow(strategy: QueueOverflowStrategy, maxQueueSizeHard: Int) {
+        SecureLogger.log("Queue overflow: \(queueCache.count) events, applying strategy: \(strategy)", category: .queue, level: .warning)
+        
+        switch strategy {
+        case .dropOldest:
+            let toRemove = queueCache.count - maxQueueSizeHard + 1
+            if toRemove > 0 {
+                let droppedEvents = Array(queueCache.prefix(toRemove)).map { $0.event }
+                queueCache.removeFirst(toRemove)
+                Task {
+                    for event in droppedEvents {
+                        await LuxAnalyticsEvents.notifyEventDropped(event, reason: "Queue overflow - oldest dropped")
+                    }
+                }
             }
             
-            group.notify(queue: .global(qos: .utility)) {
-                processBatch()
+        case .dropNewest:
+            // Don't add the new event (it will be dropped by the caller)
+            break
+            
+        case .dropAll:
+            let droppedEvents = queueCache.map { $0.event }
+            queueCache.removeAll()
+            Task {
+                for event in droppedEvents {
+                    await LuxAnalyticsEvents.notifyEventDropped(event, reason: "Queue overflow - all dropped")
+                }
             }
         }
         
-        DispatchQueue.global(qos: .utility).async {
-            processBatch()
+        saveQueue()
+    }
+    
+    // MARK: - Persistence
+    
+    private func loadQueue() -> [QueuedEvent]? {
+        // Try to load encrypted queue first
+        if let encryptedData = userDefaults.data(forKey: queueKey),
+           let decrypted = QueueEncryption.decrypt(encryptedData),
+           let events = try? JSONDecoder().decode([QueuedEvent].self, from: decrypted) {
+            return events
+        }
+        
+        // Fall back to legacy unencrypted queue
+        let legacyKey = "com.luxardolabs.LuxAnalytics.eventQueue"
+        if let data = userDefaults.data(forKey: legacyKey),
+           let events = try? JSONDecoder().decode([QueuedEvent].self, from: data) {
+            // Migrate to encrypted storage
+            saveQueue()
+            userDefaults.removeObject(forKey: legacyKey)
+            return events
+        }
+        
+        return nil
+    }
+    
+    private func saveQueue() {
+        do {
+            let data = try JSONEncoder().encode(queueCache)
+            if let encrypted = QueueEncryption.encrypt(data) {
+                userDefaults.set(encrypted, forKey: queueKey)
+            }
+        } catch {
+            SecureLogger.log("Failed to save queue: \(error)", category: .queue, level: .error)
         }
     }
-
-    private func getQueue() -> [AnalyticsEvent]? {
-        guard let data = UserDefaults.standard.data(forKey: queueKey),
-              let decoded = try? JSONDecoder().decode([AnalyticsEvent].self, from: data) else {
-            return nil
+    
+    // MARK: - Public API
+    
+    public func getQueueStats() -> QueueStats {
+        let now = Date()
+        let oldestEvent = queueCache.first
+        let newestEvent = queueCache.last
+        let oldestEventAge = oldestEvent.map { now.timeIntervalSince($0.queuedAt) }
+        let newestEventAge = newestEvent.map { now.timeIntervalSince($0.queuedAt) }
+        
+        _ = queueCache.filter { queuedEvent in
+            queuedEvent.retryCount < LuxAnalyticsDefaults.maxRetryAttempts
         }
-        return decoded
+        _ = queueCache.filter { queuedEvent in
+            queuedEvent.isExpired(ttlSeconds: LuxAnalyticsDefaults.eventTTL)
+        }
+        
+        // Calculate total size
+        let totalSizeBytes = queueCache.reduce(0) { total, event in
+            total + ((try? JSONEncoder().encode(event).count) ?? 0)
+        }
+        
+        return QueueStats(
+            totalEvents: queueCache.count,
+            totalSizeBytes: totalSizeBytes,
+            oldestEventAge: oldestEventAge,
+            newestEventAge: newestEventAge,
+            failedBatchCount: failedBatchIds.count
+        )
     }
-
-    private func save(_ queue: [AnalyticsEvent]) {
-        if let data = try? JSONEncoder().encode(queue) {
-            UserDefaults.standard.set(data, forKey: queueKey)
-        }
-    }
-}
-
-private extension Array {
-    func partitioned(by predicate: (Element) -> Bool) -> ([Element], [Element]) {
-        var matched: [Element] = []
-        var unmatched: [Element] = []
-        for e in self {
-            if predicate(e) { matched.append(e) }
-            else { unmatched.append(e) }
-        }
-        return (matched, unmatched)
+    
+    public func clear() {
+        queueCache.removeAll()
+        saveQueue()
+        SecureLogger.log("Queue cleared", category: .queue, level: .info)
     }
 }
