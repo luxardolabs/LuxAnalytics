@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 /// Configuration for certificate pinning
-public struct CertificatePinningConfig: Sendable {
+public struct CertificatePinningConfig: Sendable, CustomDebugStringConvertible {
     /// SHA256 hashes of pinned certificates (in base64)
     public let pinnedCertificateHashes: Set<String>
     
@@ -21,6 +21,11 @@ public struct CertificatePinningConfig: Sendable {
         self.allowSelfSigned = allowSelfSigned
         self.validateChain = validateChain
     }
+    
+    public var debugDescription: String {
+        let hashes = pinnedCertificateHashes.sorted().prefix(3).joined(separator: ",")
+        return "pins:\(hashes)-selfSigned:\(allowSelfSigned)-chain:\(validateChain)"
+    }
 }
 
 /// URLSession delegate for certificate pinning
@@ -30,6 +35,10 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate {
     init(config: CertificatePinningConfig?) {
         self.config = config
         super.init()
+    }
+    
+    deinit {
+        SecureLogger.log("CertificatePinningDelegate deinit", category: .general, level: .debug)
     }
     
     func urlSession(
@@ -100,12 +109,27 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate {
 // MARK: - URLSession Extension
 
 extension URLSession {
-    /// Create a URLSession with certificate pinning
+    private static var analyticsSessionCache: [String: URLSession] = [:]
+    private static let cacheLock = NSLock()
+    
+    /// Create or reuse a URLSession with certificate pinning
     static func analyticsSession(with config: CertificatePinningConfig?) -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = LuxAnalyticsConfiguration.current?.requestTimeout ?? LuxAnalyticsDefaults.requestTimeout
+        let cacheKey = config?.debugDescription ?? "no-pinning"
         
-        let delegate = CertificatePinningDelegate(config: config)
-        return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        
+        if let cached = analyticsSessionCache[cacheKey] {
+            return cached
+        }
+        
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 60 // Use fixed timeout to avoid async access
+        
+        let delegate = config != nil ? CertificatePinningDelegate(config: config) : nil
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        
+        analyticsSessionCache[cacheKey] = session
+        return session
     }
 }

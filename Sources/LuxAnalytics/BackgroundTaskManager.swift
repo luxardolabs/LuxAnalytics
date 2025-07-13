@@ -53,7 +53,7 @@ public final class BackgroundTaskManager {
         
         // Create a background task for analytics flush
         let flushTask = Task {
-            await LuxAnalytics.flushAsync()
+            await LuxAnalytics.flush()
             task.setTaskCompleted(success: true)
         }
         
@@ -71,21 +71,38 @@ extension BackgroundTaskManager {
     
     /// Setup background task handling (call from AppDelegate)
     public func setupBackgroundHandling() {
-        // Register for app lifecycle notifications
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(appDidEnterBackground),
-            name: UIApplication.didEnterBackgroundNotification,
-            object: nil
-        )
-        
         // Register background tasks
         registerBackgroundTasks()
     }
     
-    @objc private func appDidEnterBackground() {
-        // Schedule background task when app enters background
-        scheduleBackgroundFlush()
+    /// Run a simple background task with UIApplication beginBackgroundTask
+    public func runBackgroundTask(_ work: @escaping () async -> Void) async {
+        #if canImport(UIKit)
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        
+        backgroundTaskID = await UIApplication.shared.beginBackgroundTask(withName: "LuxAnalytics.flush") {
+            // Expiration handler
+            Task { @MainActor in
+                if backgroundTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                    backgroundTaskID = .invalid
+                }
+            }
+        }
+        
+        // Perform the work
+        await work()
+        
+        // End the background task
+        await MainActor.run {
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            }
+        }
+        #else
+        // On non-iOS platforms, just run the work directly
+        await work()
+        #endif
     }
 }
 

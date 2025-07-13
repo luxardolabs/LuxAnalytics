@@ -69,13 +69,18 @@ public actor LuxAnalyticsDiagnostics {
         lastSuccessfulSend = Date()
     }
     
-    func recordEventsFailed(count: Int) {
+    func recordEventsFailed(count: Int, error: Error) {
         totalEventsFailed += count
         lastFailedSend = Date()
     }
     
     func recordBatchSent() {
         totalBatchesSent += 1
+    }
+    
+    func recordBytesTransmitted(bytes: Int) {
+        // Track bytes sent for bandwidth monitoring
+        recordPayloadSize(bytes, compressedSize: bytes)
     }
     
     func recordBatchFailed() {
@@ -135,9 +140,9 @@ public actor LuxAnalyticsDiagnostics {
             diskUsage: getDiskUsage()
         )
         
-        let config = LuxAnalyticsConfiguration.current
+        let config = await LuxAnalyticsStorage.shared.getConfiguration()
         let configInfo = LuxAnalyticsMetrics.ConfigurationInfo(
-            sdkVersion: "1.0.0", // TODO: Get from package
+            sdkVersion: LuxAnalyticsVersion.current,
             configuredEndpoint: config?.apiURL.absoluteString ?? "Not configured",
             autoFlushInterval: config?.autoFlushInterval ?? 0,
             maxQueueSize: config?.maxQueueSize ?? 0,
@@ -210,29 +215,9 @@ public actor LuxAnalyticsDiagnostics {
 public extension LuxAnalytics {
     
     /// Enable diagnostic mode for debugging
-    static func enableDiagnosticMode() {
-        Task {
-            guard let config = LuxAnalyticsConfiguration.current else { return }
-            
-            // Create a new config with debug logging enabled
-            guard let debugConfig = try? LuxAnalyticsConfiguration(
-                dsn: config.dsn,
-                autoFlushInterval: config.autoFlushInterval,
-                maxQueueSize: config.maxQueueSize,
-                batchSize: config.batchSize,
-                debugLogging: true, // Force enable debug logging
-                requestTimeout: config.requestTimeout,
-                maxQueueSizeHard: config.maxQueueSizeHard,
-                eventTTL: config.eventTTL,
-                maxRetryAttempts: config.maxRetryAttempts,
-                overflowStrategy: config.overflowStrategy,
-                compressionEnabled: config.compressionEnabled,
-                compressionThreshold: config.compressionThreshold,
-                certificatePinning: config.certificatePinning
-            ) else { return }
-            
-            LuxAnalyticsConfiguration.current = debugConfig
-        }
+    static func enableDiagnosticMode() async {
+        // Enable debug logging synchronously
+        SecureLogger.updateDebugLogging(true)
     }
     
     /// Get current SDK metrics

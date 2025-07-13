@@ -95,7 +95,7 @@ public struct LuxAnalyticsConfiguration: Sendable {
     ) throws {
         // Parse DSN
         guard let urlComponents = URLComponents(string: dsn),
-              let host = urlComponents.host,
+              urlComponents.host != nil,
               let publicId = urlComponents.user,
               let path = urlComponents.path.split(separator: "/").last.map(String.init),
               !publicId.isEmpty,
@@ -161,23 +161,3 @@ public struct LuxAnalyticsConfiguration: Sendable {
     }
 }
 
-// MARK: - Configuration Storage
-extension LuxAnalyticsConfiguration {
-    /// Thread-safe storage for the current configuration
-    private static let configurationLock = NSLock()
-    nonisolated(unsafe) private static var _current: LuxAnalyticsConfiguration?
-    
-    /// The current configuration (thread-safe)
-    internal static var current: LuxAnalyticsConfiguration? {
-        get {
-            configurationLock.lock()
-            defer { configurationLock.unlock() }
-            return _current
-        }
-        set {
-            configurationLock.lock()
-            defer { configurationLock.unlock() }
-            _current = newValue
-        }
-    }
-}
