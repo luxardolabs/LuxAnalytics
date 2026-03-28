@@ -52,7 +52,8 @@ public actor AppAnalyticsContext {
                 "locale": Locale.current.identifier,
                 "timezone": TimeZone.current.identifier,
                 "device_id": deviceId,
-                "is_testflight": Self.isTestFlightBuild() ? "true" : "false"
+                "is_testflight": Self.isTestFlightBuild() ? "true" : "false",
+                "platform": "ios"
             ]
         }
         #else
@@ -67,7 +68,8 @@ public actor AppAnalyticsContext {
             "locale": Locale.current.identifier,
             "timezone": TimeZone.current.identifier,
             "device_id": deviceId,
-            "is_testflight": "false"
+            "is_testflight": "false",
+            "platform": "ios"
         ]
         #endif
     }
