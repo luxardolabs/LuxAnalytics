@@ -5,6 +5,24 @@ All notable changes to LuxAnalytics will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-03-28
+
+### Added
+- Explicit `platform` field (`"ios"`) in event metadata context, aligning with server v1.0.3 promoted-column schema
+
+### Changed
+- Replaced deprecated `UIScreen.main` with `UIWindowScene.screen` for screen resolution detection
+- Replaced `UIDevice.current.systemVersion` with `ProcessInfo.operatingSystemVersion` for OS version reporting
+- Device ID is now persisted in Keychain (survives app reinstalls); falls back to `identifierForVendor` as seed on first generation
+- Notification observers in `AnalyticsActor` are now proper actor-isolated state instead of `nonisolated(unsafe)`
+- Simplified notification observer cleanup — `NotificationCenter.removeObserver` is thread-safe, removed unnecessary MainActor hop
+- URLSession cache in `CertificatePinning` now uses Swift 6 `Mutex` (Synchronization framework) instead of `NSLock` + `nonisolated(unsafe)`
+
+### Fixed
+- 5xx server errors and network failures now emit `eventsFailed` notifications via `eventStream` — previously these were silently requeued with no app-visible signal
+- Potential race condition with `nonisolated(unsafe)` storage of `[NSObjectProtocol]` in `AnalyticsActor`
+- Potential race condition with `nonisolated(unsafe)` URLSession cache dictionary in `CertificatePinning`
+
 ## [1.0.0] - 2025-07-13
 
 ### 🎉 Initial Release

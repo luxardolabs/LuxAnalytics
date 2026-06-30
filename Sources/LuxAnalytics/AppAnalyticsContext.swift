@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 #endif
 import CryptoKit
+import Security
 
 public actor AppAnalyticsContext {
     static let shared = AppAnalyticsContext()
@@ -39,14 +40,19 @@ public actor AppAnalyticsContext {
     private func generateContext() async -> [String: String] {
         let deviceId = await getOrCreateDeviceID()
         
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        let systemVersion = "\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)"
+
         #if canImport(UIKit)
         return await MainActor.run {
-            let size = UIScreen.main.bounds
+            let screenSize = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.screen.bounds.size ?? .zero
             return [
                 "device_model": UIDevice.modelCode(),
                 "device_type": UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone",
-                "screen_resolution": "\(Int(size.width))x\(Int(size.height))",
-                "system_version": UIDevice.current.systemVersion,
+                "screen_resolution": "\(Int(screenSize.width))x\(Int(screenSize.height))",
+                "system_version": systemVersion,
                 "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "build_number": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
                 "locale": Locale.current.identifier,
@@ -62,7 +68,7 @@ public actor AppAnalyticsContext {
             "device_model": "Unknown",
             "device_type": "Unknown",
             "screen_resolution": "Unknown",
-            "system_version": "Unknown",
+            "system_version": systemVersion,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             "build_number": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             "locale": Locale.current.identifier,
@@ -74,31 +80,63 @@ public actor AppAnalyticsContext {
         #endif
     }
 
+    private static let keychainAccount = "com.luxardolabs.LuxAnalytics.deviceID"
+    private static let keychainService = "LuxAnalytics"
+
     private func getOrCreateDeviceID() async -> String {
         if let cached = deviceID {
             return cached
         }
-        
-        #if canImport(UIKit)
-        let uuid = await MainActor.run { UIDevice.current.identifierForVendor?.uuidString }
-        guard let uuid = uuid else { 
-            let fallback = "unknown"
-            deviceID = fallback
-            return fallback
+
+        // Try to read existing ID from Keychain (survives app reinstalls)
+        if let stored = Self.readFromKeychain() {
+            deviceID = stored
+            return stored
         }
-        
-        let hash = SHA256.hash(data: Data(uuid.utf8))
-        let id = hash.map { String(format: "%02x", $0) }.joined()
-        deviceID = id
-        return id
+
+        // Generate a new device ID
+        #if canImport(UIKit)
+        let seed = await MainActor.run { UIDevice.current.identifierForVendor?.uuidString } ?? UUID().uuidString
         #else
-        // Non-iOS platforms - generate a random UUID
-        let uuid = UUID().uuidString
-        let hash = SHA256.hash(data: Data(uuid.utf8))
+        let seed = UUID().uuidString
+        #endif
+
+        let hash = SHA256.hash(data: Data(seed.utf8))
         let id = hash.map { String(format: "%02x", $0) }.joined()
+
+        // Persist to Keychain
+        Self.writeToKeychain(id)
+
         deviceID = id
         return id
-        #endif
+    }
+
+    private static func readFromKeychain() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrService as String: keychainService,
+            kSecReturnData as String: true
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let id = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return id
+    }
+
+    private static func writeToKeychain(_ id: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrService as String: keychainService,
+            kSecValueData as String: Data(id.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        SecItemAdd(query as CFDictionary, nil)
     }
 }
 

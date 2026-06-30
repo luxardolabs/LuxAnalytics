@@ -3,7 +3,7 @@ import Foundation
 /// LuxAnalytics SDK version information
 public struct LuxAnalyticsVersion {
     /// Current SDK version
-    public static let current = "1.0.0"
+    public static let current = "1.0.1"
     
     /// SDK name
     public static let name = "LuxAnalytics"

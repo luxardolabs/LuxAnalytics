@@ -292,9 +292,14 @@ extension LuxAnalytics {
                     let responseString = String(data: data, encoding: .utf8)
                     let error = LuxAnalyticsError.serverError(statusCode: httpResponse.statusCode, response: responseString)
                     await analyticsActor.debugLog("Server error: \(error)")
-                    
+
                     await GlobalCircuitBreaker.shared.recordFailure(for: config.apiURL)
-                    
+
+                    // Notify failure for all events in this batch
+                    for queuedEvent in events {
+                        await LuxAnalytics.notifyEventsFailed([queuedEvent.event], error: error)
+                    }
+
                     // Requeue events for retry if under max attempts
                     for queuedEvent in events {
                         if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {
@@ -306,15 +311,21 @@ extension LuxAnalytics {
                             await LuxAnalytics.notifyEventsDropped(count: 1, reason: .dropOldest)
                         }
                     }
-                    
+
                     await LuxAnalyticsDiagnostics.shared.recordEventsFailed(count: events.count, error: error)
                 }
             }
             
         } catch {
+            let luxError = (error as? LuxAnalyticsError) ?? .networkError(error)
             await analyticsActor.debugLog("Failed to send batch: \(error)")
             await GlobalCircuitBreaker.shared.recordFailure(for: config.apiURL)
-            
+
+            // Notify failure for all events in this batch
+            for queuedEvent in events {
+                await LuxAnalytics.notifyEventsFailed([queuedEvent.event], error: luxError)
+            }
+
             // Requeue events for retry
             for queuedEvent in events {
                 if queuedEvent.shouldRetry(maxRetries: config.maxRetryAttempts) {

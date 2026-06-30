@@ -10,7 +10,7 @@ actor AnalyticsActor {
     private var currentUserId: String?
     private var currentSessionId: String?
     private var flushTask: Task<Void, Never>?
-    private nonisolated(unsafe) var notificationObservers: [NSObjectProtocol] = []
+    private var notificationObservers: [NSObjectProtocol] = []
     
     init(configuration: LuxAnalyticsConfiguration) {
         self.configuration = configuration
@@ -120,36 +120,20 @@ actor AnalyticsActor {
     
     private func removeLifecycleObservers() {
         #if canImport(UIKit)
-        Task {
-            await self.unregisterNotificationObservers()
-        }
+        unregisterNotificationObservers()
         #endif
     }
-    
-    
-    
-    private func clearNotificationObservers() {
-        notificationObservers.removeAll()
-    }
-    
+
     private func addNotificationObserver(_ observer: NSObjectProtocol) {
         notificationObservers.append(observer)
     }
     
-    private func unregisterNotificationObservers() async {
-        // We need to handle this without crossing actor boundaries
-        // Since NSObjectProtocol is not Sendable, we'll use nonisolated(unsafe) access
-        let observers = notificationObservers  // This is already nonisolated(unsafe)
-        
-        // Switch to main actor for NotificationCenter operations
-        await MainActor.run {
-            observers.forEach { observer in
-                NotificationCenter.default.removeObserver(observer)
-            }
+    private func unregisterNotificationObservers() {
+        // NotificationCenter.removeObserver is thread-safe — no need to hop to MainActor
+        for observer in notificationObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
-        
-        // Clear the array
-        clearNotificationObservers()
+        notificationObservers.removeAll()
     }
     
     private func handleAppBackground() async {

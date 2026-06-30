@@ -25,13 +25,15 @@ Complete documentation for LuxAnalytics iOS SDK.
 - [📡 **Network & Offline**](Network-Offline.md) - Network handling and offline strategies
 - [🛡️ **Error Handling**](Error-Handling.md) - Comprehensive error management and recovery
 
-### Coming Soon
-- [📱 SwiftUI Integration](SwiftUI-Integration.md) - SwiftUI-specific best practices
-- [🎯 UIKit Integration](UIKit-Integration.md) - UIKit integration patterns
-- [🏗️ Architecture Patterns](Architecture-Patterns.md) - Recommended app architectures
-- [🛠️ Development Setup](Development-Setup.md) - Contributing to LuxAnalytics
-- [🧪 Testing Guide](Testing.md) - Testing strategies for analytics
-- [🏗️ Custom Extensions](Custom-Extensions.md) - Extending SDK functionality
+### Framework Integration
+- [📱 **SwiftUI Integration**](SwiftUI-Integration.md) - SwiftUI-specific patterns and best practices
+- [🎯 **UIKit Integration**](UIKit-Integration.md) - UIKit integration patterns and components
+- [🏗️ **Architecture Patterns**](Architecture-Patterns.md) - Integration with MVVM, VIPER, Clean Architecture, and more
+
+### Development & Testing
+- [🛠️ **Development Setup**](Development-Setup.md) - Complete development environment and contribution guide
+- [🧪 **Testing Guide**](Testing.md) - Comprehensive testing strategies for analytics integration
+- [🏗️ **Custom Extensions**](Custom-Extensions.md) - Extending SDK functionality with plugins and processors
 
 ---
 

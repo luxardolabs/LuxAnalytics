@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Synchronization
 
 /// Configuration for certificate pinning
 public struct CertificatePinningConfig: Sendable, CustomDebugStringConvertible {
@@ -109,27 +110,25 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate {
 // MARK: - URLSession Extension
 
 extension URLSession {
-    private static let cacheLock = NSLock()
-    private static nonisolated(unsafe) var analyticsSessionCache: [String: URLSession] = [:]
-    
+    private static let sessionCache = Mutex<[String: URLSession]>([:])
+
     /// Create or reuse a URLSession with certificate pinning
     static func analyticsSession(with config: CertificatePinningConfig?) -> URLSession {
         let cacheKey = config?.debugDescription ?? "no-pinning"
-        
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        
-        if let cached = analyticsSessionCache[cacheKey] {
-            return cached
+
+        return sessionCache.withLock { cache in
+            if let cached = cache[cacheKey] {
+                return cached
+            }
+
+            let configuration = URLSessionConfiguration.default
+            configuration.timeoutIntervalForRequest = 60
+
+            let delegate = config != nil ? CertificatePinningDelegate(config: config) : nil
+            let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+
+            cache[cacheKey] = session
+            return session
         }
-        
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 60 // Use fixed timeout to avoid async access
-        
-        let delegate = config != nil ? CertificatePinningDelegate(config: config) : nil
-        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
-        
-        analyticsSessionCache[cacheKey] = session
-        return session
     }
 }
