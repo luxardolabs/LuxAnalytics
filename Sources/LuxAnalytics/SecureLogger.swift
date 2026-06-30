@@ -1,35 +1,23 @@
 import Foundation
 import os.log
+import Synchronization
 
-/// Actor for thread-safe debug logging state
-private actor DebugLoggingState {
-    static let shared = DebugLoggingState()
-    private var enabled = false
-    
-    func setEnabled(_ enabled: Bool) {
-        self.enabled = enabled
-    }
-    
-    func isEnabled() -> Bool {
-        return enabled
-    }
-}
+/// Thread-safe debug logging flag with lock-free synchronous reads.
+/// `log()` is synchronous and runs from every isolation domain, so it cannot
+/// `await` an actor; an Atomic<Bool> gives correct, synchronous access.
+private let debugLoggingFlag = Atomic<Bool>(false)
 
 /// Secure logger that automatically redacts sensitive information
 public struct SecureLogger: Sendable {
-    
+
     /// Update the cached debug logging flag
     public static func updateDebugLogging(_ enabled: Bool) {
-        Task {
-            await DebugLoggingState.shared.setEnabled(enabled)
-        }
+        debugLoggingFlag.store(enabled, ordering: .relaxed)
     }
-    
-    /// Check if debug logging is enabled (synchronous fallback)
+
+    /// Check if debug logging is enabled
     private static var debugLoggingEnabled: Bool {
-        // For synchronous access, we'll default to false
-        // Real async access should use the async methods
-        return false
+        debugLoggingFlag.load(ordering: .relaxed)
     }
     
     /// Log categories

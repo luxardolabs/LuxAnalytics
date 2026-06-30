@@ -5,6 +5,25 @@ All notable changes to LuxAnalytics will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-06-30
+
+### Fixed
+- Circuit breaker no longer latches open permanently: `GlobalCircuitBreaker.isOpen` now consults `shouldAllowRequest()`, restoring the `resetTimeout`-based open→half-open recovery
+- Debug logging now works: `SecureLogger` reads its flag from an `Atomic<Bool>` instead of a hardcoded `false` stub, so `debugLogging: true` produces output again
+- Device-ID Keychain write is now idempotent (delete-before-add) and checks `SecItemAdd` status, so a rotated ID actually persists instead of silently failing with `errSecDuplicateItem`
+- Server response bodies are redacted via `SecureLogger` before entering `LuxAnalyticsError`, preventing potential PII leakage to SDK consumers through `eventsFailed`
+- `eventStream` no longer drops events emitted immediately after subscription: `EventManager` is now `Mutex`-backed with synchronous observer registration
+- `AsyncTimer` cancels its inner task on stream termination (no orphaned task per session)
+- `BackgroundTaskManager` guards against double `endBackgroundTask` on late expiration
+- Removed a reference to the undefined `LuxAnalytics.flushAsync()` (latent build break on non-iOS platforms)
+
+### Changed
+- `QueueEncryption` caches the symmetric key in a `Mutex`, hitting the Keychain once per process instead of on every enqueue/flush
+- `LuxAnalyticsError` now explicitly conforms to `Sendable`
+
+### Tests
+- Replaced the stale XCTest suite (which no longer compiled against the current API) with a Swift Testing suite of 32 tests covering configuration, circuit-breaker recovery, redaction, event-stream delivery, queue, and encryption; verified on iOS 26 / Swift 6
+
 ## [1.0.1] - 2026-03-28
 
 ### Added

@@ -129,14 +129,30 @@ public actor AppAnalyticsContext {
     }
 
     private static func writeToKeychain(_ id: String) {
-        let query: [String: Any] = [
+        // Delete any existing entry first: a bare SecItemAdd fails with
+        // errSecDuplicateItem when one already exists, so a rotated ID would
+        // silently never persist. Delete-then-add makes the write idempotent.
+        let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: keychainAccount,
-            kSecAttrService as String: keychainService,
-            kSecValueData as String: Data(id.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrService as String: keychainService
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        SecItemDelete(baseQuery as CFDictionary)
+
+        var addQuery = baseQuery
+        addQuery[kSecValueData as String] = Data(id.utf8)
+        // After-first-unlock (this-device-only) keeps analytics working while the
+        // device is locked; the device ID is a non-secret SHA256 of identifierForVendor.
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess {
+            SecureLogger.log(
+                "Failed to persist device ID to Keychain (status \(status))",
+                category: .security,
+                level: .warning
+            )
+        }
     }
 }
 

@@ -150,7 +150,7 @@ actor AnalyticsActor {
         }
         #else
         // On non-iOS platforms, just flush immediately
-        await LuxAnalytics.flushAsync()
+        await LuxAnalytics.flush()
         #endif
     }
     

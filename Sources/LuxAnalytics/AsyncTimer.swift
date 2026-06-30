@@ -12,7 +12,7 @@ public struct AsyncTimer {
         tolerance: Duration? = nil
     ) -> AsyncStream<Void> {
         AsyncStream { continuation in
-            Task {
+            let timerTask = Task {
                 while !Task.isCancelled {
                     do {
                         try await Task.sleep(for: duration, tolerance: tolerance)
@@ -22,12 +22,13 @@ public struct AsyncTimer {
                         break
                     }
                 }
-                
+
                 continuation.finish()
             }
-            
+
             continuation.onTermination = { @Sendable _ in
-                // Cleanup if needed
+                // Cancel the inner task so it stops sleeping when the stream ends.
+                timerTask.cancel()
             }
         }
     }

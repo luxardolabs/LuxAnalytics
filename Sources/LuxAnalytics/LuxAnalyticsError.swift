@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur in LuxAnalytics
-public enum LuxAnalyticsError: LocalizedError, Equatable {
+public enum LuxAnalyticsError: LocalizedError, Equatable, Sendable {
     public static func == (lhs: LuxAnalyticsError, rhs: LuxAnalyticsError) -> Bool {
         switch (lhs, rhs) {
         case (.alreadyInitialized, .alreadyInitialized),

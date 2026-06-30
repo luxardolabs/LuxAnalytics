@@ -275,7 +275,9 @@ extension LuxAnalytics {
                     
                 case 400...499:
                     // Client error - don't retry
-                    let responseString = String(data: data, encoding: .utf8)
+                    // Redact the response body before it enters the public error:
+                    // it can reach SDK consumers via eventsFailed and may contain PII.
+                    let responseString = String(data: data, encoding: .utf8).map(SecureLogger.redact)
                     let error = LuxAnalyticsError.serverError(statusCode: httpResponse.statusCode, response: responseString)
                     await analyticsActor.debugLog("Client error: \(error)")
                     
@@ -289,7 +291,9 @@ extension LuxAnalytics {
                     
                 default:
                     // Server error - will retry
-                    let responseString = String(data: data, encoding: .utf8)
+                    // Redact the response body before it enters the public error:
+                    // it can reach SDK consumers via eventsFailed and may contain PII.
+                    let responseString = String(data: data, encoding: .utf8).map(SecureLogger.redact)
                     let error = LuxAnalyticsError.serverError(statusCode: httpResponse.statusCode, response: responseString)
                     await analyticsActor.debugLog("Server error: \(error)")
 

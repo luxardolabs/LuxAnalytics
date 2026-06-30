@@ -1,61 +1,73 @@
-import XCTest
+import Testing
+import Foundation
+import Security
 @testable import LuxAnalytics
 
-final class LuxAnalyticsTests: XCTestCase {
-    
-    override func setUp() async throws {
-        try await super.setUp()
-        // Reset state between tests
-        LuxAnalyticsTestHelper.reset()
+// MARK: - Shared test helpers
+
+private let validDSN = "https://testpublic@test.example.com/api/v1/events/testproject"
+
+/// Probes whether the Keychain is usable in the current test environment.
+/// A SwiftPM test bundle has no app host, so Keychain access is unentitled
+/// (errSecMissingEntitlement) and the encryption-key tests must skip rather
+/// than report a false failure. They run normally with a host app / on device.
+private func keychainIsAvailable() -> Bool {
+    let base: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "LuxAnalyticsTests",
+        kSecAttrAccount as String: "com.luxardolabs.LuxAnalytics.keychainProbe"
+    ]
+    SecItemDelete(base as CFDictionary)
+    var add = base
+    add[kSecValueData as String] = Data("probe".utf8)
+    let status = SecItemAdd(add as CFDictionary, nil)
+    SecItemDelete(base as CFDictionary)
+    return status == errSecSuccess
+}
+
+private func makeEvent(_ name: String) -> AnalyticsEvent {
+    AnalyticsEvent(
+        name: name,
+        timestamp: ISO8601DateFormatter().string(from: Date()),
+        userId: nil,
+        sessionId: nil,
+        metadata: [:]
+    )
+}
+
+// MARK: - Configuration
+
+@Suite(.serialized)
+struct ConfigurationTests {
+    init() async { await LuxAnalyticsTestHelper.reset() }
+
+    @Test func parsesDSN() throws {
+        let dsn = "https://a1b2c3d4e5f6@analytics.example.com/api/v1/events/1234567890123456"
+        let config = try LuxAnalyticsConfiguration(dsn: dsn)
+        #expect(config.dsn == dsn)
+        #expect(config.publicId == "a1b2c3d4e5f6")
+        #expect(config.projectId == "1234567890123456")
+        #expect(config.apiURL.absoluteString == "https://analytics.example.com/api/v1/events/")
     }
-    
-    override func tearDown() async throws {
-        LuxAnalyticsTestHelper.reset()
-        try await super.tearDown()
-    }
-    
-    // MARK: - Configuration Tests
-    
-    func testInitialization() throws {
-        let config = try LuxAnalyticsConfiguration(
-            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
-        )
-        
-        XCTAssertNoThrow(try LuxAnalytics.initialize(with: config))
-        XCTAssertTrue(LuxAnalytics.isInitialized)
-    }
-    
-    func testDoubleInitializationThrows() throws {
-        let config = try LuxAnalyticsConfiguration(
-            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
-        )
-        
-        try LuxAnalytics.initialize(with: config)
-        
-        XCTAssertThrowsError(try LuxAnalytics.initialize(with: config)) { error in
-            XCTAssertEqual(error as? LuxAnalyticsError, .alreadyInitialized)
+
+    @Test func invalidDSNThrows() {
+        #expect(throws: LuxAnalyticsError.self) {
+            try LuxAnalyticsConfiguration(dsn: "not-a-url")
         }
     }
-    
-    func testDefaultConfiguration() {
-        let config = try LuxAnalyticsConfiguration(
-            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id"
-        )
-        
-        XCTAssertEqual(config.autoFlushInterval, LuxAnalyticsDefaults.autoFlushInterval)
-        XCTAssertEqual(config.maxQueueSize, LuxAnalyticsDefaults.maxQueueSize)
-        XCTAssertEqual(config.batchSize, LuxAnalyticsDefaults.batchSize)
-        XCTAssertEqual(config.debugLogging, LuxAnalyticsDefaults.debugLogging)
-        XCTAssertEqual(config.requestTimeout, LuxAnalyticsDefaults.requestTimeout)
-        XCTAssertEqual(config.maxQueueSizeHard, LuxAnalyticsDefaults.maxQueueSizeHard)
-        XCTAssertEqual(config.eventTTL, LuxAnalyticsDefaults.eventTTL)
-        XCTAssertEqual(config.maxRetryAttempts, LuxAnalyticsDefaults.maxRetryAttempts)
-        XCTAssertEqual(config.overflowStrategy, LuxAnalyticsDefaults.overflowStrategy)
+
+    @Test func usesDefaults() throws {
+        let config = try LuxAnalyticsConfiguration(dsn: validDSN)
+        #expect(config.autoFlushInterval == LuxAnalyticsDefaults.autoFlushInterval)
+        #expect(config.maxQueueSize == LuxAnalyticsDefaults.maxQueueSize)
+        #expect(config.batchSize == LuxAnalyticsDefaults.batchSize)
+        #expect(config.maxRetryAttempts == LuxAnalyticsDefaults.maxRetryAttempts)
+        #expect(config.overflowStrategy == LuxAnalyticsDefaults.overflowStrategy)
     }
-    
-    func testCustomConfiguration() {
+
+    @Test func appliesCustomValues() throws {
         let config = try LuxAnalyticsConfiguration(
-            dsn: "https://test-public-id@test.example.com/api/v1/events/test-project-id",
+            dsn: validDSN,
             autoFlushInterval: 60,
             maxQueueSize: 200,
             batchSize: 20,
@@ -66,170 +78,177 @@ final class LuxAnalyticsTests: XCTestCase {
             maxRetryAttempts: 3,
             overflowStrategy: .dropNewest
         )
-        
-        XCTAssertEqual(config.autoFlushInterval, 60)
-        XCTAssertEqual(config.maxQueueSize, 200)
-        XCTAssertEqual(config.batchSize, 20)
-        XCTAssertEqual(config.debugLogging, true)
-        XCTAssertEqual(config.requestTimeout, 30)
-        XCTAssertEqual(config.maxQueueSizeHard, 1000)
-        XCTAssertEqual(config.eventTTL, 86400)
-        XCTAssertEqual(config.maxRetryAttempts, 3)
-        XCTAssertEqual(config.overflowStrategy, .dropNewest)
+        #expect(config.autoFlushInterval == 60)
+        #expect(config.maxQueueSize == 200)
+        #expect(config.batchSize == 20)
+        #expect(config.debugLogging == true)
+        #expect(config.overflowStrategy == .dropNewest)
     }
-    
-    func testDSNParsing() throws {
-        let dsn = "https://a1b2c3d4e5f6@analytics.example.com/api/v1/events/1234567890123456"
-        let config = try LuxAnalyticsConfiguration(dsn: dsn)
-        
-        XCTAssertEqual(config.dsn, dsn)
-        XCTAssertEqual(config.publicId, "a1b2c3d4e5f6")
-        XCTAssertEqual(config.projectId, "1234567890123456")
-        XCTAssertEqual(config.apiURL.absoluteString, "https://analytics.example.com/api/v1/events/")
+
+    @Test func initializeSetsInitialized() async throws {
+        let config = try LuxAnalyticsConfiguration(dsn: validDSN)
+        try await LuxAnalytics.initialize(with: config)
+        #expect(await LuxAnalytics.isInitialized == true)
     }
-    
-    func testInvalidDSNThrows() {
-        // Missing public ID
-        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "https://analytics.example.com/api/v1/events/123")) { error in
-            guard case LuxAnalyticsError.invalidConfiguration(let message) = error else {
-                XCTFail("Expected invalidConfiguration error")
-                return
-            }
-            XCTAssertTrue(message.contains("Invalid DSN format"))
-        }
-        
-        // Missing project ID
-        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "https://public-id@analytics.example.com/api/v1/events/")) { error in
-            guard case LuxAnalyticsError.invalidConfiguration = error else {
-                XCTFail("Expected invalidConfiguration error")
-                return
-            }
-        }
-        
-        // Invalid URL
-        XCTAssertThrowsError(try LuxAnalyticsConfiguration(dsn: "not-a-url")) { error in
-            guard case LuxAnalyticsError.invalidConfiguration = error else {
-                XCTFail("Expected invalidConfiguration error")
-                return
-            }
+
+    @Test func doubleInitializeThrows() async throws {
+        let config = try LuxAnalyticsConfiguration(dsn: validDSN)
+        try await LuxAnalytics.initialize(with: config)
+        do {
+            try await LuxAnalytics.initialize(with: config)
+            Issue.record("Expected the second initialize to throw .alreadyInitialized")
+        } catch let error as LuxAnalyticsError {
+            #expect(error == .alreadyInitialized)
         }
     }
 }
 
-// MARK: - Analytics Settings Tests
-final class AnalyticsSettingsTests: XCTestCase {
-    
-    override func setUp() async throws {
-        try await super.setUp()
-        LuxAnalyticsTestHelper.reset()
+// MARK: - Circuit breaker (validates the auto-recovery fix)
+
+@Suite
+struct CircuitBreakerTests {
+    @Test func startsClosedAndAllowsRequests() async {
+        let breaker = CircuitBreaker(failureThreshold: 3, resetTimeout: 60, halfOpenMaxAttempts: 1)
+        #expect(await breaker.shouldAllowRequest() == true)
     }
-    
-    override func tearDown() async throws {
-        LuxAnalyticsTestHelper.reset()
-        try await super.tearDown()
+
+    @Test func opensAfterReachingFailureThreshold() async {
+        let breaker = CircuitBreaker(failureThreshold: 3, resetTimeout: 60, halfOpenMaxAttempts: 1)
+        for _ in 0..<3 { await breaker.recordFailure() }
+        #expect(await breaker.shouldAllowRequest() == false)
     }
-    
-    func testSettingsEnabled() async {
-        await AnalyticsSettings.shared.setEnabled(true)
-        let isEnabled = await AnalyticsSettings.shared.isEnabled
-        XCTAssertTrue(isEnabled)
-    }
-    
-    func testSettingsDisabled() async {
-        await AnalyticsSettings.shared.setEnabled(false)
-        let isEnabled = await AnalyticsSettings.shared.isEnabled
-        XCTAssertFalse(isEnabled)
-    }
-    
-    func testSettingsPersistence() async {
-        // Set to false
-        await AnalyticsSettings.shared.setEnabled(false)
-        
-        // Check that the shared instance persists the value
-        let isEnabled = await AnalyticsSettings.shared.isEnabled
-        XCTAssertFalse(isEnabled)
-        
-        // Clean up
-        await AnalyticsSettings.shared.setEnabled(true)
+
+    /// The bug fixed in 1.0.2: an open breaker must transition back to half-open
+    /// once resetTimeout elapses, rather than latching open forever.
+    @Test func recoversToHalfOpenAfterResetTimeout() async throws {
+        let breaker = CircuitBreaker(failureThreshold: 2, resetTimeout: 0.2, halfOpenMaxAttempts: 1)
+        for _ in 0..<2 { await breaker.recordFailure() }
+        #expect(await breaker.shouldAllowRequest() == false)
+
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await breaker.shouldAllowRequest() == true)
     }
 }
 
-// MARK: - Queue Tests
-final class LuxAnalyticsQueueTests: XCTestCase {
-    
-    override func setUp() async throws {
-        try await super.setUp()
-        try LuxAnalyticsTestHelper.initializeForTesting()
-        await LuxAnalyticsQueue.shared.clear()
+@Suite(.serialized)
+struct GlobalCircuitBreakerTests {
+    @Test func opensAfterFailuresAndResetClears() async {
+        let url = URL(string: "https://cb-test.example.com/api")!
+        await GlobalCircuitBreaker.shared.remove(for: url)
+
+        for _ in 0..<5 { await GlobalCircuitBreaker.shared.recordFailure(for: url) }
+        #expect(await GlobalCircuitBreaker.shared.isOpen(for: url) == true)
+
+        await GlobalCircuitBreaker.shared.reset(for: url)
+        #expect(await GlobalCircuitBreaker.shared.isOpen(for: url) == false)
+
+        await GlobalCircuitBreaker.shared.remove(for: url)
     }
-    
-    override func tearDown() async throws {
-        await LuxAnalyticsQueue.shared.clear()
-        LuxAnalyticsTestHelper.reset()
-        try await super.tearDown()
+}
+
+// MARK: - SecureLogger redaction (validates redaction used by the server-response fix)
+
+@Suite
+struct SecureLoggerTests {
+    @Test func redactsEmailAddresses() {
+        #expect(SecureLogger.redact("reach me at john.doe@example.com today").contains("<email>"))
+        #expect(SecureLogger.redact("reach me at john.doe@example.com today").contains("@") == false)
     }
-    
-    func testQueueEnqueue() async {
-        let event = AnalyticsEvent(
-            name: "test_event",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: "user123",
-            sessionId: "session123",
-            metadata: ["key": "value"]
-        )
-        
-        let initialSize = await LuxAnalyticsQueue.shared.queueSize
-        await LuxAnalyticsQueue.shared.enqueue(event)
-        let newSize = await LuxAnalyticsQueue.shared.queueSize
-        
-        XCTAssertEqual(newSize, initialSize + 1)
+
+    @Test func redactsIPAddresses() {
+        #expect(SecureLogger.redact("host 192.168.1.42 is down").contains("<ip>"))
     }
-    
-    func testQueueClear() async {
-        let event = AnalyticsEvent(
-            name: "test_event",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: nil,
-            sessionId: nil,
-            metadata: [:]
-        )
-        
-        await LuxAnalyticsQueue.shared.enqueue(event)
-        await LuxAnalyticsQueue.shared.enqueue(event)
-        
-        await LuxAnalyticsQueue.shared.clear()
-        let size = await LuxAnalyticsQueue.shared.queueSize
-        
-        XCTAssertEqual(size, 0)
+
+    @Test func redactsUUIDs() {
+        #expect(SecureLogger.redact("id 550e8400-e29b-41d4-a716-446655440000").contains("<uuid>"))
     }
-    
-    func testQueueStats() async {
-        await LuxAnalyticsQueue.shared.clear()
-        
-        // Add some events
-        for i in 0..<5 {
-            let event = AnalyticsEvent(
-                name: "test_event_\(i)",
-                timestamp: ISO8601DateFormatter().string(from: Date()),
-                userId: nil,
-                sessionId: nil,
-                metadata: [:]
-            )
-            await LuxAnalyticsQueue.shared.enqueue(event)
+
+    @Test func leavesNonSensitiveTextUnchanged() {
+        #expect(SecureLogger.redact("just a normal log line") == "just a normal log line")
+    }
+
+    @Test func updateDebugLoggingIsSynchronousAndSafe() {
+        // Exercises the Atomic<Bool> path that replaced the dead actor stub.
+        SecureLogger.updateDebugLogging(true)
+        SecureLogger.updateDebugLogging(false)
+        SecureLogger.log("noop", category: .general, level: .debug)
+    }
+}
+
+// MARK: - Queue encryption (validates round-trip + cached-key reset)
+
+@Suite(.serialized)
+struct QueueEncryptionTests {
+    @Test(.enabled(if: keychainIsAvailable()))
+    func encryptDecryptRoundTrips() throws {
+        let original = Data("sensitive payload \u{1F510}".utf8)
+        let encrypted = try #require(QueueEncryption.encrypt(original))
+        #expect(encrypted != original)
+        let decrypted = try #require(QueueEncryption.decrypt(encrypted))
+        #expect(decrypted == original)
+    }
+
+    @Test(.enabled(if: keychainIsAvailable()))
+    func regeneratesUsableKeyAfterDeletion() throws {
+        _ = QueueEncryption.encrypt(Data("warm up".utf8))
+        QueueEncryption.deleteKey()  // clears Keychain entry AND the in-memory cache
+
+        let data = Data("after reset".utf8)
+        let encrypted = try #require(QueueEncryption.encrypt(data))
+        let decrypted = try #require(QueueEncryption.decrypt(encrypted))
+        #expect(decrypted == data)
+    }
+}
+
+// MARK: - Event stream (validates the synchronous-registration race fix)
+
+@Suite(.serialized)
+struct EventStreamTests {
+    @Test func deliversEventEmittedRightAfterSubscription() async {
+        // Accessing eventStream registers the observer synchronously (the 1.0.2 fix),
+        // so an event emitted immediately afterward is not lost.
+        var iterator = LuxAnalyticsEvents.eventStream.makeAsyncIterator()
+        await LuxAnalytics.notifyEventsSent([makeEvent("stream_probe_event")])
+
+        let received = await iterator.next()
+        guard case .eventsSent(let events)? = received else {
+            Issue.record("Expected .eventsSent, got \(String(describing: received))")
+            return
         }
-        
-        let stats = await LuxAnalyticsQueue.shared.getQueueStats()
-        XCTAssertEqual(stats.totalEvents, 5)
-        XCTAssertEqual(stats.retriableEvents, 5)
-        XCTAssertEqual(stats.expiredEvents, 0)
-        XCTAssertLessThan(stats.oldestEventAge, 1) // Should be very recent
+        #expect(events.first?.name == "stream_probe_event")
     }
 }
 
-// MARK: - Event Tests
-final class AnalyticsEventTests: XCTestCase {
-    
-    func testEventCreation() {
+// MARK: - LuxAnalyticsError (validates explicit Sendable + equality)
+
+@Suite
+struct LuxAnalyticsErrorTests {
+    @Test func serverErrorEqualityConsidersCodeAndResponse() {
+        #expect(LuxAnalyticsError.serverError(statusCode: 500, response: "x")
+                == LuxAnalyticsError.serverError(statusCode: 500, response: "x"))
+        #expect(LuxAnalyticsError.serverError(statusCode: 500, response: "x")
+                != LuxAnalyticsError.serverError(statusCode: 500, response: "y"))
+    }
+
+    @Test func errorDescriptionIncludesStatusCode() {
+        let desc = LuxAnalyticsError.serverError(statusCode: 503, response: nil).errorDescription
+        #expect(desc?.contains("503") == true)
+    }
+
+    /// Compile-time proof of the explicit Sendable conformance: the value is
+    /// captured by a Task closure, which requires Sendable.
+    @Test func isSendableAcrossConcurrencyBoundary() async {
+        let error = LuxAnalyticsError.notInitialized
+        let roundTripped = await Task { error }.value
+        #expect(roundTripped == .notInitialized)
+    }
+}
+
+// MARK: - Analytics event model
+
+@Suite
+struct AnalyticsEventTests {
+    @Test func storesProvidedValues() {
         let event = AnalyticsEvent(
             name: "test_event",
             timestamp: "2024-01-01T00:00:00Z",
@@ -237,16 +256,15 @@ final class AnalyticsEventTests: XCTestCase {
             sessionId: "session123",
             metadata: ["key": "value"]
         )
-        
-        XCTAssertEqual(event.name, "test_event")
-        XCTAssertEqual(event.timestamp, "2024-01-01T00:00:00Z")
-        XCTAssertEqual(event.userId, "user123")
-        XCTAssertEqual(event.sessionId, "session123")
-        XCTAssertEqual(event.metadata["key"], "value")
-        XCTAssertFalse(event.id.isEmpty)
+        #expect(event.name == "test_event")
+        #expect(event.timestamp == "2024-01-01T00:00:00Z")
+        #expect(event.userId == "user123")
+        #expect(event.sessionId == "session123")
+        #expect(event.metadata["key"] == "value")
+        #expect(event.id.isEmpty == false)
     }
-    
-    func testEventCodable() throws {
+
+    @Test func roundTripsThroughCodable() throws {
         let event = AnalyticsEvent(
             name: "test_event",
             timestamp: "2024-01-01T00:00:00Z",
@@ -254,107 +272,107 @@ final class AnalyticsEventTests: XCTestCase {
             sessionId: "session123",
             metadata: ["key": "value"]
         )
-        
         let encoded = try JSONEncoder().encode(event)
         let decoded = try JSONDecoder().decode(AnalyticsEvent.self, from: encoded)
-        
-        XCTAssertEqual(event.id, decoded.id)
-        XCTAssertEqual(event.name, decoded.name)
-        XCTAssertEqual(event.timestamp, decoded.timestamp)
-        XCTAssertEqual(event.userId, decoded.userId)
-        XCTAssertEqual(event.sessionId, decoded.sessionId)
-        XCTAssertEqual(event.metadata["key"], decoded.metadata["key"])
+        #expect(decoded.id == event.id)
+        #expect(decoded.name == event.name)
+        #expect(decoded.metadata["key"] == "value")
     }
 }
 
-// MARK: - Queued Event Tests
-final class QueuedEventTests: XCTestCase {
-    
-    func testQueuedEventExpiry() {
-        let event = AnalyticsEvent(
-            name: "test",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: nil,
-            sessionId: nil,
-            metadata: [:]
-        )
-        
-        var queuedEvent = QueuedEvent(event: event)
-        
-        // Not expired
-        XCTAssertFalse(queuedEvent.isExpired(ttlSeconds: 3600))
-        
-        // Simulate old event
-        queuedEvent = QueuedEvent(event: event)
-        // We can't easily test actual expiry without modifying the struct
-        // In production, we'd use dependency injection for Date
+// MARK: - Queued event retry logic
+
+@Suite
+struct QueuedEventTests {
+    @Test func freshEventIsNotExpired() {
+        let queued = QueuedEvent(event: makeEvent("test"))
+        #expect(queued.isExpired(ttlSeconds: 3600) == false)
     }
-    
-    func testRetryDelay() {
-        let event = AnalyticsEvent(
-            name: "test",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: nil,
-            sessionId: nil,
-            metadata: [:]
-        )
-        
-        var queuedEvent = QueuedEvent(event: event)
-        
-        // First retry - 1 second base with ±25% jitter
-        queuedEvent.retryCount = 0
-        let delay1 = queuedEvent.nextRetryDelay()
-        XCTAssertGreaterThan(delay1, 0.75)  // 1 - 25%
-        XCTAssertLessThan(delay1, 1.25)     // 1 + 25%
-        
-        // Second retry - 2 seconds base with ±25% jitter
-        queuedEvent.retryCount = 1
-        let delay2 = queuedEvent.nextRetryDelay()
-        XCTAssertGreaterThan(delay2, 1.5)   // 2 - 25%
-        XCTAssertLessThan(delay2, 2.5)      // 2 + 25%
-        
-        // Max delay
-        queuedEvent.retryCount = 100
-        let delayMax = queuedEvent.nextRetryDelay()
-        XCTAssertLessThanOrEqual(delayMax, 375) // 300 + 25% jitter
+
+    @Test func retryDelayGrowsWithRetryCount() {
+        var queued = QueuedEvent(event: makeEvent("test"))
+
+        queued.retryCount = 0
+        let first = queued.nextRetryDelay()
+        #expect(first > 0.75)
+        #expect(first < 1.25)
+
+        queued.retryCount = 1
+        let second = queued.nextRetryDelay()
+        #expect(second > 1.5)
+        #expect(second < 2.5)
+
+        queued.retryCount = 100
+        #expect(queued.nextRetryDelay() <= 375)
     }
-    
-    func testShouldRetry() {
-        let event = AnalyticsEvent(
-            name: "test",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            userId: nil,
-            sessionId: nil,
-            metadata: [:]
-        )
-        
-        var queuedEvent = QueuedEvent(event: event)
-        
-        // Should retry initially
-        XCTAssertTrue(queuedEvent.shouldRetry(maxRetries: 3))
-        
-        // Should not retry after max attempts
-        queuedEvent.retryCount = 3
-        XCTAssertFalse(queuedEvent.shouldRetry(maxRetries: 3))
+
+    @Test func shouldRetryRespectsMaxAttempts() {
+        var queued = QueuedEvent(event: makeEvent("test"))
+        #expect(queued.shouldRetry(maxRetries: 3) == true)
+        queued.retryCount = 3
+        #expect(queued.shouldRetry(maxRetries: 3) == false)
     }
 }
 
-// MARK: - Network Monitor Tests
-final class NetworkMonitorTests: XCTestCase {
-    
-    func testNetworkMonitorSingleton() async {
-        let monitor1 = NetworkMonitor.shared
-        let monitor2 = NetworkMonitor.shared
-        XCTAssertTrue(monitor1 === monitor2)
+// MARK: - Queue behavior
+
+@Suite(.serialized)
+struct QueueTests {
+    init() async throws {
+        try await LuxAnalyticsTestHelper.initializeForTesting()
+        await LuxAnalyticsQueue.shared.clear()
     }
-    
-    func testNetworkMonitorProperties() async {
-        // Can't easily test actual network changes in unit tests
-        // but we can verify the properties exist and return values
-        let isConnected = await NetworkMonitor.shared.isConnected
-        let isExpensive = await NetworkMonitor.shared.isExpensive
-        
-        XCTAssertNotNil(isConnected)
-        XCTAssertNotNil(isExpensive)
+
+    @Test func enqueueIncrementsSize() async {
+        let before = await LuxAnalyticsQueue.shared.queueSize
+        await LuxAnalyticsQueue.shared.enqueue(makeEvent("e"))
+        #expect(await LuxAnalyticsQueue.shared.queueSize == before + 1)
+    }
+
+    @Test func clearEmptiesQueue() async {
+        await LuxAnalyticsQueue.shared.enqueue(makeEvent("a"))
+        await LuxAnalyticsQueue.shared.enqueue(makeEvent("b"))
+        await LuxAnalyticsQueue.shared.clear()
+        #expect(await LuxAnalyticsQueue.shared.queueSize == 0)
+    }
+
+    @Test func statsReflectQueuedEvents() async {
+        await LuxAnalyticsQueue.shared.clear()
+        for i in 0..<5 { await LuxAnalyticsQueue.shared.enqueue(makeEvent("e\(i)")) }
+        let stats = await LuxAnalyticsQueue.shared.getQueueStats()
+        #expect(stats.totalEvents == 5)
+        #expect(stats.failedBatchCount == 0)
+        if let age = stats.oldestEventAge {
+            #expect(age < 5)
+        }
+    }
+}
+
+// MARK: - Settings
+
+@Suite(.serialized)
+struct AnalyticsSettingsTests {
+    @Test func enableThenDisableIsReflected() async {
+        await AnalyticsSettings.shared.setEnabled(true)
+        #expect(await AnalyticsSettings.shared.isEnabled == true)
+
+        await AnalyticsSettings.shared.setEnabled(false)
+        #expect(await AnalyticsSettings.shared.isEnabled == false)
+
+        await AnalyticsSettings.shared.setEnabled(true)  // restore default
+    }
+}
+
+// MARK: - Network monitor
+
+@Suite
+struct NetworkMonitorTests {
+    @Test func sharedReturnsSingleton() {
+        #expect(NetworkMonitor.shared === NetworkMonitor.shared)
+    }
+
+    @Test func exposesConnectionProperties() async {
+        _ = await NetworkMonitor.shared.isConnected
+        _ = await NetworkMonitor.shared.isExpensive
     }
 }

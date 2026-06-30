@@ -1,23 +1,22 @@
 import Foundation
+import Synchronization
 
 /// Modern async event stream for monitoring analytics events
 public struct LuxAnalyticsEvents: Sendable {
-    
+
     /// Stream of analytics events as they occur
     public static var eventStream: AsyncStream<AnalyticsEventNotification> {
         AsyncStream { continuation in
             let observer = EventObserver { notification in
                 continuation.yield(notification)
             }
-            
-            Task {
-                await EventManager.shared.addObserver(observer)
-            }
-            
+
+            // Register synchronously before returning the stream so events emitted
+            // immediately after subscription aren't lost to an actor-hop gap.
+            EventManager.shared.addObserver(observer)
+
             continuation.onTermination = { _ in
-                Task {
-                    await EventManager.shared.removeObserver(observer)
-                }
+                EventManager.shared.removeObserver(observer)
             }
         }
     }
@@ -33,21 +32,28 @@ public enum AnalyticsEventNotification: Sendable {
 }
 
 /// Internal event manager
-actor EventManager {
+///
+/// Backed by a Mutex (not an actor) so observer registration and notification
+/// are synchronous — this closes the subscription race in `eventStream` where
+/// events emitted before an async `addObserver` completed would be dropped.
+final class EventManager: Sendable {
     static let shared = EventManager()
-    
-    private var observers: [EventObserver] = []
-    
+
+    private let observers = Mutex<[EventObserver]>([])
+
     func addObserver(_ observer: EventObserver) {
-        observers.append(observer)
+        observers.withLock { $0.append(observer) }
     }
-    
+
     func removeObserver(_ observer: EventObserver) {
-        observers.removeAll { $0.id == observer.id }
+        observers.withLock { $0.removeAll { $0.id == observer.id } }
     }
-    
+
     func notify(_ notification: AnalyticsEventNotification) {
-        for observer in observers {
+        // Copy under the lock, then call handlers outside it to avoid
+        // re-entrancy if a handler touches the manager.
+        let current = observers.withLock { $0 }
+        for observer in current {
             observer.handler(notification)
         }
     }
@@ -68,25 +74,25 @@ extension LuxAnalyticsEvents {
     internal static let shared = LuxAnalyticsEvents()
     
     func notifyQueued(_ event: AnalyticsEvent) async {
-        await EventManager.shared.notify(.eventQueued(event))
+        EventManager.shared.notify(.eventQueued(event))
     }
     
     func notifySent(_ event: AnalyticsEvent) async {
-        await EventManager.shared.notify(.eventsSent([event]))
+        EventManager.shared.notify(.eventsSent([event]))
     }
     
     func notifyFailed(_ event: AnalyticsEvent, error: Error) async {
         let luxError = error as? LuxAnalyticsError ?? .networkError(error)
-        await EventManager.shared.notify(.eventsFailed([event], error: luxError))
+        EventManager.shared.notify(.eventsFailed([event], error: luxError))
     }
     
     func notifyDropped(_ event: AnalyticsEvent, reason: String) async {
         // Convert reason to overflow strategy (default to dropOldest)
-        await EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
+        EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
     }
     
     func notifyExpired(_ event: AnalyticsEvent) async {
-        await EventManager.shared.notify(.eventsExpired([event]))
+        EventManager.shared.notify(.eventsExpired([event]))
     }
 }
 
@@ -111,23 +117,23 @@ extension LuxAnalytics {
     /// }
     /// ```
     public static func notifyEventQueued(_ event: AnalyticsEvent) async {
-        await EventManager.shared.notify(.eventQueued(event))
+        EventManager.shared.notify(.eventQueued(event))
     }
     
     public static func notifyEventsSent(_ events: [AnalyticsEvent]) async {
-        await EventManager.shared.notify(.eventsSent(events))
+        EventManager.shared.notify(.eventsSent(events))
     }
     
     public static func notifyEventsFailed(_ events: [AnalyticsEvent], error: LuxAnalyticsError) async {
-        await EventManager.shared.notify(.eventsFailed(events, error: error))
+        EventManager.shared.notify(.eventsFailed(events, error: error))
     }
     
     public static func notifyEventsDropped(count: Int, reason: QueueOverflowStrategy) async {
-        await EventManager.shared.notify(.eventsDropped(count: count, reason: reason))
+        EventManager.shared.notify(.eventsDropped(count: count, reason: reason))
     }
     
     public static func notifyEventsExpired(_ events: [AnalyticsEvent]) async {
-        await EventManager.shared.notify(.eventsExpired(events))
+        EventManager.shared.notify(.eventsExpired(events))
     }
 }
 
@@ -135,11 +141,11 @@ extension LuxAnalytics {
 extension LuxAnalyticsEvents {
     /// Convenience method for single event drop notification
     public static func notifyEventDropped(_ event: AnalyticsEvent, reason: String) async {
-        await EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
+        EventManager.shared.notify(.eventsDropped(count: 1, reason: .dropOldest))
     }
     
     /// Convenience method for single event expiry notification
     public static func notifyEventExpired(_ event: AnalyticsEvent) async {
-        await EventManager.shared.notify(.eventsExpired([event]))
+        EventManager.shared.notify(.eventsExpired([event]))
     }
 }

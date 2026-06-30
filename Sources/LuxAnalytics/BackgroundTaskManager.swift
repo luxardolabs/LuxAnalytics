@@ -109,6 +109,8 @@ extension BackgroundTaskManager {
         await MainActor.run {
             if backgroundTaskID != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                // Invalidate so a late-firing expiration handler can't end it twice.
+                backgroundTaskID = .invalid
             }
         }
         #else

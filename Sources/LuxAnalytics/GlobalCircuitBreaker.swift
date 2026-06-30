@@ -19,7 +19,10 @@ actor GlobalCircuitBreaker {
     /// Check if circuit breaker is open for a given URL
     func isOpen(for url: URL) async -> Bool {
         let breaker = getOrCreateBreaker(for: url)
-        return await breaker.currentState == .open
+        // Use shouldAllowRequest() rather than reading currentState directly:
+        // it applies the resetTimeout and transitions open -> halfOpen, which is
+        // what enables automatic recovery. Reading currentState would latch open forever.
+        return await !breaker.shouldAllowRequest()
     }
     
     /// Record a successful request for a URL
